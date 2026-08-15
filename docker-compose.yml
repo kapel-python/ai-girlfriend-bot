@@ -1,0 +1,9 @@
+services:
+  ai-girl:
+    build: .
+    container_name: ai-girl-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./bot.db:/app/bot.db

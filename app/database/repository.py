@@ -1,0 +1,135 @@
+"""Репозитории: единственное место, где живёт SQL (п. 19 ТЗ)."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+import aiosqlite
+
+from app.database.models import HistoryMessage, MemoryFact, UserSettings
+
+
+def _now() -> str:
+    return datetime.utcnow().isoformat()
+
+
+class UserSettingsRepository:
+    def __init__(self, db: aiosqlite.Connection, default_model: str, default_debounce: float):
+        self._db = db
+        self._default_model = default_model
+        self._default_debounce = default_debounce
+
+    async def get(self, user_id: int) -> UserSettings:
+        cursor = await self._db.execute(
+            "SELECT * FROM user_settings WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return await self._create_default(user_id)
+        return UserSettings(
+            user_id=row["user_id"],
+            selected_model=row["selected_model"],
+            custom_prompt=row["custom_prompt"],
+            personality=row["personality"],
+            mood=row["mood"] if "mood" in row.keys() else "",
+            proactive_stage=row["proactive_stage"] if "proactive_stage" in row.keys() else 0,
+            typing_enabled=bool(row["typing_enabled"]),
+            debounce_seconds=row["debounce_seconds"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    async def _create_default(self, user_id: int) -> UserSettings:
+        now = _now()
+        await self._db.execute(
+            """INSERT INTO user_settings
+               (user_id, selected_model, custom_prompt, personality,
+                typing_enabled, debounce_seconds, created_at, updated_at)
+               VALUES (?, ?, '', 'default', 1, ?, ?, ?)""",
+            (user_id, self._default_model, self._default_debounce, now, now),
+        )
+        await self._db.commit()
+        return await self.get(user_id)
+
+    async def update(self, user_id: int, **fields) -> None:
+        allowed = {"selected_model", "custom_prompt", "personality", "mood",
+                   "proactive_stage", "typing_enabled", "debounce_seconds"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return
+        # гарантируем, что строка существует (upsert)
+        await self.get(user_id)
+        updates["updated_at"] = _now()
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = [int(v) if isinstance(v, bool) else v for v in updates.values()]
+        await self._db.execute(
+            f"UPDATE user_settings SET {set_clause} WHERE user_id = ?",
+            (*values, user_id),
+        )
+        await self._db.commit()
+
+
+class HistoryRepository:
+    def __init__(self, db: aiosqlite.Connection):
+        self._db = db
+
+    async def add(self, user_id: int, role: str, content: str) -> None:
+        await self._db.execute(
+            "INSERT INTO history (user_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, role, content, _now()),
+        )
+        await self._db.commit()
+
+    async def get_recent(self, user_id: int, limit: int) -> list[HistoryMessage]:
+        cursor = await self._db.execute(
+            """SELECT role, content, created_at FROM history
+               WHERE user_id = ? ORDER BY id DESC LIMIT ?""",
+            (user_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [
+            HistoryMessage(user_id=user_id, role=r["role"], content=r["content"],
+                           created_at=datetime.fromisoformat(r["created_at"]))
+            for r in reversed(rows)
+        ]
+
+    async def clear(self, user_id: int) -> None:
+        await self._db.execute("DELETE FROM history WHERE user_id = ?", (user_id,))
+        await self._db.commit()
+
+    async def count(self, user_id: int) -> int:
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) AS c FROM history WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row["c"]
+
+
+class MemoryRepository:
+    """Долгосрочная память: значимые факты о пользователе (п. 13 ТЗ)."""
+
+    MAX_FACTS = 30
+
+    def __init__(self, db: aiosqlite.Connection):
+        self._db = db
+
+    async def get_facts(self, user_id: int) -> list[str]:
+        cursor = await self._db.execute(
+            "SELECT fact FROM memory_facts WHERE user_id = ? ORDER BY id",
+            (user_id,),
+        )
+        rows = await cursor.fetchall()
+        return [r["fact"] for r in rows]
+
+    async def replace_facts(self, user_id: int, facts: list[str]) -> None:
+        facts = facts[: self.MAX_FACTS]
+        await self._db.execute("DELETE FROM memory_facts WHERE user_id = ?", (user_id,))
+        await self._db.executemany(
+            "INSERT INTO memory_facts (user_id, fact, created_at) VALUES (?, ?, ?)",
+            [(user_id, f, _now()) for f in facts],
+        )
+        await self._db.commit()
+
+    async def clear(self, user_id: int) -> None:
+        await self._db.execute("DELETE FROM memory_facts WHERE user_id = ?", (user_id,))
+        await self._db.commit()
