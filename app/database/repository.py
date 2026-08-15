@@ -121,6 +121,13 @@ class MemoryRepository:
         rows = await cursor.fetchall()
         return [r["fact"] for r in rows]
 
+    async def count(self, user_id: int) -> int:
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) AS c FROM memory_facts WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row["c"]
+
     async def replace_facts(self, user_id: int, facts: list[str]) -> None:
         facts = facts[: self.MAX_FACTS]
         await self._db.execute("DELETE FROM memory_facts WHERE user_id = ?", (user_id,))

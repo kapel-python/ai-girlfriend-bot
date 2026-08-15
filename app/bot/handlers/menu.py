@@ -79,16 +79,35 @@ async def cb_continue(callback: CallbackQuery) -> None:
 async def cb_status(
     callback: CallbackQuery,
     settings_repo: UserSettingsRepository,
+    history_repo: HistoryRepository,
+    memory_repo: MemoryRepository,
+    ai_client: "AIClient",
 ) -> None:
+    from datetime import datetime
+
+    from app.config import MSK, load_config
+
     settings = await settings_repo.get(callback.from_user.id)
     preset = PERSONALITY_PRESETS.get(settings.personality, PERSONALITY_PRESETS["default"])
+    config = load_config()
+    messages_count = await history_repo.count(callback.from_user.id)
+    facts_count = await memory_repo.count(callback.from_user.id)
+    balance = await ai_client.get_balance()
+    now_msk = datetime.now(MSK)
+
     text = (
         "📋 текущие настройки\n\n"
         f"🤖 модель: {settings.selected_model}\n"
         f"🎭 характер: {preset['title']}\n"
         f"🧠 свой промт: {'задан' if settings.custom_prompt else 'не задан'}\n"
         f"⌨️ симуляция набора: {'вкл' if settings.typing_enabled else 'выкл'}\n"
-        f"⏱ debounce: {settings.debounce_seconds:.1f} сек"
+        f"⏱ debounce: {settings.debounce_seconds:.1f} сек\n\n"
+        "📊 статистика\n\n"
+        f"💬 сообщений в диалоге: {messages_count}/{config.short_memory_limit}\n"
+        f"🧠 фактов в памяти: {facts_count}\n"
+        f"💭 настроение: {settings.mood or 'нейтральное'}\n"
+        f"💰 баланс API: {balance} ₽\n"
+        f"🕐 время у неё: {now_msk.strftime('%H:%M')} (МСК)"
     )
     await callback.message.edit_text(text, reply_markup=kb.back_to_menu())
     await callback.answer()

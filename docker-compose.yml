@@ -1,9 +1,9 @@
 services:
-  ai-girl:
+  bot:
     build: .
-    container_name: ai-girl-bot
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: .env
+    environment:
+      - DATABASE_PATH=/app/data/bot.db
     volumes:
-      - ./bot.db:/app/bot.db
+      - ./data:/app/data

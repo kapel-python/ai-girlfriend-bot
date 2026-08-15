@@ -1,7 +1,7 @@
-.venv/
+.env
+bot.db
+data/
 __pycache__/
 *.pyc
-.env
-*.db
-logs/
+.git/
 tests/

@@ -24,11 +24,17 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from app.ai.client import AIClient, AIClientError
-from app.ai.prompts import OFFENDED_MOOD, PROACTIVE_STAGE_PROMPTS, build_system_prompt
+from app.ai.prompts import (
+    MORNING_PROMPT,
+    OFFENDED_MOOD,
+    PROACTIVE_STAGE_PROMPTS,
+    build_system_prompt,
+)
 from app.ai.response_parser import parse_response
-from app.config import Config
+from app.config import MSK, Config
 from app.conversation.memory import MemoryService
 from app.conversation.sender import TelegramSender
 from app.database.repository import HistoryRepository, UserSettingsRepository
@@ -43,8 +49,10 @@ class UserSession:
     task: asyncio.Task | None = None
     last_activity: float = field(default_factory=time.monotonic)
     last_chat_id: int | None = None
-    proactive_sent: bool = False
+    proactive_stage: int | None = None   # None = ещё не загружена из БД
     proactive_due_minutes: float = 0.0
+    proactive_snooze_until: float = 0.0  # модель решила молчать — повторить позже
+    last_morning_date: object = None     # дата последнего «доброго утра» (МСК)
 
 
 class ConversationManager:
@@ -137,6 +145,17 @@ class ConversationManager:
             settings.personality, settings.custom_prompt, settings.mood
         )
         context: list[dict] = [{"role": "system", "content": system_prompt}]
+
+        # время суток и день недели — всегда по Москве
+        now_msk = datetime.now(MSK)
+        context.append({
+            "role": "system",
+            "content": (
+                f"Сейчас {now_msk.strftime('%A, %H:%M')} по Москве. "
+                "Учитывай время суток и день недели в тоне и темах: ночью ты сонная, "
+                "утром бодрее, будни и выходные ощущаются по-разному."
+            ),
+        })
 
         facts = await self._memory.get_long_memory(user_id)
         if facts:
@@ -302,6 +321,80 @@ class ConversationManager:
         except asyncio.CancelledError:
             raise
 
+    async def _maybe_good_morning(
+        self, user_id: int, session: UserSession, idle_minutes: float
+    ) -> bool:
+        """«Доброе утро»: вчера попрощались, собеседник молчит с ночи.
+
+        Возвращает True, если утренняя попытка была сделана (отправлена или
+        модель решила молчать) — тогда стадийная логика в этот тик не работает.
+        """
+        cfg = self._config
+        now_msk = datetime.now(MSK)
+        if not (cfg.morning_start_hour <= now_msk.hour < cfg.morning_end_hour):
+            return False
+        if session.last_morning_date == now_msk.date():
+            return False
+        if idle_minutes < cfg.morning_min_idle_minutes:
+            return False
+
+        # одна попытка за утро (даже если модель решит молчать)
+        session.last_morning_date = now_msk.date()
+        session.generation_id += 1
+        chat_id = session.last_chat_id
+
+        settings = await self._settings_repo.get(user_id)
+        typing_enabled = settings.typing_enabled and cfg.typing_simulation
+
+        hours = idle_minutes / 60
+        silence = f"{hours:.1f} часов" if hours >= 1 else f"{int(idle_minutes)} минут"
+
+        logger.info("user_id=%s event=good_morning_started", user_id)
+        context = await self._build_context(user_id, settings)
+        context.append({
+            "role": "user",
+            "content": MORNING_PROMPT.format(
+                time_msk=now_msk.strftime("%H:%M"), silence=silence
+            ),
+        })
+
+        typing_task: asyncio.Task | None = None
+        try:
+            raw = await self._ai.chat(
+                model=settings.selected_model, messages=context, json_mode=True
+            )
+            parsed = parse_response(raw)
+            await self._save_mood(user_id, parsed.mood)
+
+            if not parsed.should_reply:
+                logger.info("user_id=%s event=good_morning_skipped", user_id)
+                return True
+
+            if typing_enabled:
+                typing_task = asyncio.create_task(self._sender.typing_keepalive(chat_id))
+            sent = await self._sender.send_messages(
+                chat_id=chat_id,
+                user_id=user_id,
+                messages=parsed.messages,
+                typing_enabled=typing_enabled,
+                typing_task=typing_task,
+            )
+            for s in sent:
+                await self._history.add(user_id, "assistant", s)
+            session.last_activity = time.monotonic()  # отсчёт стадий — от её сообщения
+            logger.info("user_id=%s event=good_morning_sent", user_id)
+            return True
+        except AIClientError as e:
+            logger.warning("user_id=%s event=good_morning_api_error error=%s", user_id, e)
+            return True
+        finally:
+            if typing_task is not None:
+                typing_task.cancel()
+                try:
+                    await typing_task
+                except asyncio.CancelledError:
+                    pass
+
     async def _maybe_proactive(self, user_id: int, session: UserSession) -> None:
         if session.last_chat_id is None:
             return
@@ -315,14 +408,19 @@ class ConversationManager:
             return
 
         idle_minutes = (time.monotonic() - session.last_activity) / 60
-        if idle_minutes < session.proactive_due_minutes:
-            return
         # не вмешиваемся в активный диалог
         if session.task and not session.task.done():
             return
         # пишем первой только тем, с кем уже был разговор
         short_memory = await self._memory.get_short_memory(user_id)
         if not short_memory:
+            return
+
+        # --- «доброе утро»: вчера попрощались, он молчит с ночи ---
+        if await self._maybe_good_morning(user_id, session, idle_minutes):
+            return
+
+        if idle_minutes < session.proactive_due_minutes:
             return
 
         stage = session.proactive_stage

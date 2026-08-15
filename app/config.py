@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import timezone, timedelta
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# часовой пояс проекта — всегда Москва
+try:
+    from zoneinfo import ZoneInfo
+    MSK = ZoneInfo("Europe/Moscow")
+except Exception:  # на случай отсутствия tzdata
+    MSK = timezone(timedelta(hours=3), name="MSK")
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -55,6 +63,9 @@ class Config:
     proactive_offense_min_minutes: float
     proactive_offense_max_minutes: float
     proactive_check_interval: float
+    morning_start_hour: int
+    morning_end_hour: int
+    morning_min_idle_minutes: float
 
     @property
     def chat_completions_url(self) -> str:
@@ -95,4 +106,7 @@ def load_config() -> Config:
         proactive_offense_min_minutes=_get_float("PROACTIVE_OFFENSE_MIN_MINUTES", 60.0),
         proactive_offense_max_minutes=_get_float("PROACTIVE_OFFENSE_MAX_MINUTES", 120.0),
         proactive_check_interval=_get_float("PROACTIVE_CHECK_INTERVAL", 60.0),
+        morning_start_hour=_get_int("MORNING_START_HOUR", 7),
+        morning_end_hour=_get_int("MORNING_END_HOUR", 11),
+        morning_min_idle_minutes=_get_float("MORNING_MIN_IDLE_MINUTES", 240.0),
     )

@@ -159,6 +159,7 @@ async def manager_tests() -> None:
         proactive_stage2_min_minutes=0.001, proactive_stage2_max_minutes=0.002,
         proactive_offense_min_minutes=0.001, proactive_offense_max_minutes=0.002,
         proactive_check_interval=0.2,
+        morning_start_hour=0, morning_end_hour=23, morning_min_idle_minutes=999,
     )
     tmp = tempfile.mktemp(suffix=".db")
     db = await init_db(tmp)
@@ -303,6 +304,7 @@ async def manager_tests() -> None:
         proactive_stage2_min_minutes=999, proactive_stage2_max_minutes=999,
         proactive_offense_min_minutes=999, proactive_offense_max_minutes=999,
         proactive_check_interval=999,
+        morning_start_hour=0, morning_end_hour=23, morning_min_idle_minutes=999,
     )
     ai9 = FakeAI([])
     sender9 = FakeSender()
@@ -340,6 +342,39 @@ async def manager_tests() -> None:
     s8 = await settings_repo.get(8)
     check("proactive: should_reply=false → не пишет первой", sender8.sent == ["ок"])
     check("proactive: пропущенная попытка не эскалирует стадию", s8.proactive_stage == 0)
+
+    # --- 4.9 «доброе утро» после вечернего прощания --- #
+    cfg_morning = Config(
+        bot_token="x", ai_api_key="x", ai_base_url="https://x",
+        default_model="test-model", message_debounce=0.3,
+        typing_simulation=True, short_memory_limit=20,
+        database_path=":memory:",
+        proactive_enabled=True,
+        proactive_stage1_min_minutes=999, proactive_stage1_max_minutes=999,
+        proactive_stage2_min_minutes=999, proactive_stage2_max_minutes=999,
+        proactive_offense_min_minutes=999, proactive_offense_max_minutes=999,
+        proactive_check_interval=0.2,
+        morning_start_hour=0, morning_end_hour=23, morning_min_idle_minutes=0.001,
+    )
+    ai10 = FakeAI(['{"should_reply": true, "messages": ["споки)"], "mood": "сонное"}',
+                   '{"should_reply": true, "messages": ["доброе утро) как спалось?"]}'])
+    sender10 = FakeSender()
+    manager10 = ConversationManager(cfg_morning, ai10, sender10,
+                                    MemoryService(ai10, history_repo, memory_repo, 20),
+                                    settings_repo, history_repo)
+    await manager10.handle_message(10, 1000, "всё, я спать")
+    await asyncio.sleep(1.0)
+    check("morning: вечерний ответ отправлен", sender10.sent == ["споки)"])
+
+    manager10.start_proactive_loop()
+    await asyncio.sleep(1.5)
+    check("morning: утром написала первой",
+          "доброе утро) как спалось?" in sender10.sent)
+    count10 = len(sender10.sent)
+    await asyncio.sleep(1.0)
+    check("morning: одна попытка за утро, не спамит", len(sender10.sent) == count10)
+
+    await manager10.shutdown()
 
     await manager.shutdown()
     await manager2.shutdown()

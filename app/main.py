@@ -63,6 +63,7 @@ async def main() -> None:
     dp["history_repo"] = history_repo
     dp["memory_repo"] = memory_repo
     dp["model_registry"] = model_registry
+    dp["ai_client"] = ai_client
 
     dp.include_router(build_router())
 
