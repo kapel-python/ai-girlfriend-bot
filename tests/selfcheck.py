@@ -56,8 +56,11 @@ check("parser: fallback обычного текста", p.should_reply and len(p
 p = parse_response("[NO_REPLY]")
 check("parser: маркер молчания", not p.should_reply)
 
-p = parse_response('{"should_reply": true, "messages": ["a","b","c","d","e","f","g"]}')
-check("parser: лимит количества сообщений", len(p.messages) == 5)
+p = parse_response('{"should_reply": true, "messages": ["a","b","c","d","e","f","g","h","i","j"]}')
+check("parser: лимит количества сообщений", len(p.messages) == 8)
+
+p = parse_response('{"should_reply": true, "messages": ["1","2","3","4","5"]}')
+check("parser: 5 сообщений подряд допустимы", len(p.messages) == 5)
 
 f = parse_facts('{"facts": ["любит кошек", "работает программистом"]}')
 check("parser: факты", f == ["любит кошек", "работает программистом"])

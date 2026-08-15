@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 NO_REPLY_MARKER = "[NO_REPLY]"
-MAX_MESSAGES = 5
+MAX_MESSAGES = 8
 MAX_MESSAGE_LEN = 4000  # запас под лимит Telegram 4096
 
 
