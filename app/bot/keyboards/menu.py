@@ -8,7 +8,6 @@ from app.ai.prompts import PERSONALITY_PRESETS
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="💬 продолжить диалог", callback_data="menu:continue"))
     builder.row(InlineKeyboardButton(text="🧹 очистить диалог", callback_data="menu:clear"))
     builder.row(InlineKeyboardButton(text="🎭 настройки характера", callback_data="menu:personality"))
     if is_admin:

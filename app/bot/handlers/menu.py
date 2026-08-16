@@ -85,14 +85,6 @@ async def cb_back(callback: CallbackQuery, state: FSMContext, config: Config) ->
     await callback.answer()
 
 
-@router.callback_query(F.data == "menu:continue")
-async def cb_continue(callback: CallbackQuery) -> None:
-    await callback.message.edit_text(
-        "просто пиши — я здесь 🙂", reply_markup=kb.back_to_menu()
-    )
-    await callback.answer()
-
-
 @router.callback_query(F.data == "menu:status")
 async def cb_status(
     callback: CallbackQuery,
