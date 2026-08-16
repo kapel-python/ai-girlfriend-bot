@@ -14,6 +14,8 @@ class UserSettings:
     personality: str = "default"          # ключ пресета характера
     mood: str = ""                        # текущее настроение персонажа
     proactive_stage: int = 0              # стадия проактивности (0-3)
+    last_activity_ts: float = 0.0         # время последней активности (epoch), для восстановления сессий
+    last_chat_id: int | None = None       # чат для проактивных сообщений после перезапуска
     typing_enabled: bool = True
     debounce_seconds: float = 2.0
     created_at: datetime = field(default_factory=datetime.utcnow)

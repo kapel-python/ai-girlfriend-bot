@@ -33,6 +33,8 @@ class UserSettingsRepository:
             personality=row["personality"],
             mood=row["mood"] if "mood" in row.keys() else "",
             proactive_stage=row["proactive_stage"] if "proactive_stage" in row.keys() else 0,
+            last_activity_ts=row["last_activity_ts"] if "last_activity_ts" in row.keys() else 0.0,
+            last_chat_id=row["last_chat_id"] if "last_chat_id" in row.keys() else None,
             typing_enabled=bool(row["typing_enabled"]),
             debounce_seconds=row["debounce_seconds"],
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -53,7 +55,8 @@ class UserSettingsRepository:
 
     async def update(self, user_id: int, **fields) -> None:
         allowed = {"selected_model", "custom_prompt", "personality", "mood",
-                   "proactive_stage", "typing_enabled", "debounce_seconds"}
+                   "proactive_stage", "last_activity_ts", "last_chat_id",
+                   "typing_enabled", "debounce_seconds"}
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             return
@@ -67,6 +70,20 @@ class UserSettingsRepository:
             (*values, user_id),
         )
         await self._db.commit()
+
+    async def get_recently_active(self, within_seconds: float) -> list[UserSettings]:
+        """Пользователи с известным чатом и недавней активностью — для
+        восстановления сессий после перезапуска (проактивность, доброе утро)."""
+        import time as _time
+
+        cutoff = _time.time() - within_seconds
+        cursor = await self._db.execute(
+            """SELECT user_id FROM user_settings
+               WHERE last_chat_id IS NOT NULL AND last_activity_ts > ?""",
+            (cutoff,),
+        )
+        rows = await cursor.fetchall()
+        return [await self.get(row["user_id"]) for row in rows]
 
 
 class HistoryRepository:

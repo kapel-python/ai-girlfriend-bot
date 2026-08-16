@@ -50,5 +50,9 @@ async def init_db(path: str) -> aiosqlite.Connection:
         await db.execute("ALTER TABLE user_settings ADD COLUMN mood TEXT NOT NULL DEFAULT ''")
     if "proactive_stage" not in columns:
         await db.execute("ALTER TABLE user_settings ADD COLUMN proactive_stage INTEGER NOT NULL DEFAULT 0")
+    if "last_activity_ts" not in columns:
+        await db.execute("ALTER TABLE user_settings ADD COLUMN last_activity_ts REAL NOT NULL DEFAULT 0")
+    if "last_chat_id" not in columns:
+        await db.execute("ALTER TABLE user_settings ADD COLUMN last_chat_id INTEGER")
     await db.commit()
     return db

@@ -68,6 +68,7 @@ async def main() -> None:
     dp.include_router(build_router())
 
     logger.info("event=bot_starting model=%s", config.default_model)
+    await manager.restore_sessions()
     manager.start_proactive_loop()
     try:
         await bot.delete_webhook(drop_pending_updates=True)

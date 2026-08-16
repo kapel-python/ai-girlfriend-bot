@@ -13,6 +13,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -377,6 +378,22 @@ async def manager_tests() -> None:
     await asyncio.sleep(1.0)
     check("morning: одна попытка за утро, не спамит", len(sender10.sent) == count10)
 
+    # --- 4.10 сессии переживают «перезапуск» (last_activity в БД) --- #
+    s11 = await settings_repo.get(10)
+    check("restore: last_chat_id и last_activity_ts сохранены в БД",
+          s11.last_chat_id == 1000 and s11.last_activity_ts > 0)
+
+    manager11 = ConversationManager(cfg_morning, ai10, sender10,
+                                    MemoryService(ai10, history_repo, memory_repo, 20),
+                                    settings_repo, history_repo)
+    await manager11.restore_sessions()
+    restored = manager11._sessions.get(10)
+    check("restore: сессия восстановлена после «перезапуска»",
+          restored is not None and restored.last_chat_id == 1000)
+    idle_restored = (time.monotonic() - restored.last_activity) / 60 if restored else 0
+    check("restore: молчание до перезапуска учтено", idle_restored > 0.0005)
+
+    await manager11.shutdown()
     await manager10.shutdown()
 
     await manager.shutdown()

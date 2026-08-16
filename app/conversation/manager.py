@@ -103,7 +103,12 @@ class ConversationManager:
         session.proactive_stage = 0
         session.proactive_due_minutes = self._due_for_stage(0)
         session.proactive_snooze_until = 0.0
-        await self._settings_repo.update(user_id, proactive_stage=0)
+        await self._settings_repo.update(
+            user_id,
+            proactive_stage=0,
+            last_activity_ts=time.time(),
+            last_chat_id=chat_id,
+        )
         generation = session.generation_id
 
         if session.task and not session.task.done():
@@ -298,6 +303,25 @@ class ConversationManager:
     # проактивность: персонаж пишет первой после долгого молчания         #
     # ------------------------------------------------------------------ #
 
+    async def restore_sessions(self, within_hours: float = 48.0) -> None:
+        """Восстанавливает сессии из БД после перезапуска.
+
+        Без этого проактивность и «доброе утро» работали только для тех,
+        кто написал после старта бота: last_activity жил в памяти процесса.
+        """
+        active = await self._settings_repo.get_recently_active(within_hours * 3600)
+        now_mono = time.monotonic()
+        now_ts = time.time()
+        for s in active:
+            session = self._session(s.user_id)
+            session.last_chat_id = s.last_chat_id
+            # last_activity в сессии — monotonic; конвертируем из epoch,
+            # чтобы молчание «до перезапуска» учитывалось
+            session.last_activity = now_mono - max(0.0, now_ts - s.last_activity_ts)
+            session.proactive_stage = s.proactive_stage
+        if active:
+            logger.info("event=sessions_restored count=%d", len(active))
+
     def start_proactive_loop(self) -> None:
         if not self._config.proactive_enabled:
             logger.info("event=proactive_disabled")
@@ -382,6 +406,7 @@ class ConversationManager:
             for s in sent:
                 await self._history.add(user_id, "assistant", s)
             session.last_activity = time.monotonic()  # отсчёт стадий — от её сообщения
+            await self._settings_repo.update(user_id, last_activity_ts=time.time())
             logger.info("user_id=%s event=good_morning_sent", user_id)
             return True
         except AIClientError as e:
@@ -481,7 +506,9 @@ class ConversationManager:
             session.proactive_stage = new_stage
             session.proactive_due_minutes = self._due_for_stage(new_stage)
             session.last_activity = time.monotonic()  # отсчёт следующей стадии — от её сообщения
-            await self._settings_repo.update(user_id, proactive_stage=new_stage)
+            await self._settings_repo.update(
+                user_id, proactive_stage=new_stage, last_activity_ts=time.time()
+            )
             logger.info("user_id=%s event=proactive_sent stage=%d", user_id, new_stage)
         except AIClientError as e:
             logger.warning("user_id=%s event=proactive_api_error error=%s", user_id, e)
