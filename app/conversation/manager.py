@@ -169,7 +169,10 @@ class ConversationManager:
 
     async def _build_context(self, user_id: int, settings, custom_prompt: str = "") -> list[dict]:
         system_prompt = build_system_prompt(
-            settings.personality, custom_prompt or settings.custom_prompt, settings.mood
+            settings.personality,
+            custom_prompt or settings.custom_prompt,
+            settings.mood,
+            getattr(settings, "custom_personality", ""),
         )
         context: list[dict] = [{"role": "system", "content": system_prompt}]
 

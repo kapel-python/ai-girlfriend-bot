@@ -35,6 +35,7 @@ class UserSettingsRepository:
             proactive_stage=row["proactive_stage"] if "proactive_stage" in row.keys() else 0,
             last_activity_ts=row["last_activity_ts"] if "last_activity_ts" in row.keys() else 0.0,
             last_chat_id=row["last_chat_id"] if "last_chat_id" in row.keys() else None,
+            custom_personality=row["custom_personality"] if "custom_personality" in row.keys() else "",
             typing_enabled=bool(row["typing_enabled"]),
             debounce_seconds=row["debounce_seconds"],
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -47,7 +48,7 @@ class UserSettingsRepository:
             """INSERT INTO user_settings
                (user_id, selected_model, custom_prompt, personality,
                 typing_enabled, debounce_seconds, created_at, updated_at)
-               VALUES (?, ?, '', 'default', 1, ?, ?, ?)""",
+               VALUES (?, ?, '', 'realistic', 1, ?, ?, ?)""",
             (user_id, self._default_model, self._default_debounce, now, now),
         )
         await self._db.commit()
@@ -56,7 +57,7 @@ class UserSettingsRepository:
     async def update(self, user_id: int, **fields) -> None:
         allowed = {"selected_model", "custom_prompt", "personality", "mood",
                    "proactive_stage", "last_activity_ts", "last_chat_id",
-                   "typing_enabled", "debounce_seconds"}
+                   "custom_personality", "typing_enabled", "debounce_seconds"}
         updates = {k: v for k, v in fields.items() if k in allowed}
         if not updates:
             return

@@ -11,7 +11,8 @@ class UserSettings:
     user_id: int
     selected_model: str
     custom_prompt: str = ""
-    personality: str = "default"          # ключ пресета характера
+    personality: str = "realistic"        # ключ пресета характера ("custom" — свой текст)
+    custom_personality: str = ""          # свой характер, заданный пользователем
     mood: str = ""                        # текущее настроение персонажа
     proactive_stage: int = 0              # стадия проактивности (0-3)
     last_activity_ts: float = 0.0         # время последней активности (epoch), для восстановления сессий

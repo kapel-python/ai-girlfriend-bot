@@ -109,7 +109,12 @@ async def cb_status(
 
     user_id = callback.from_user.id
     settings = await settings_repo.get(user_id)
-    preset = PERSONALITY_PRESETS.get(settings.personality, PERSONALITY_PRESETS["default"])
+    if settings.personality == "custom":
+        preset_title = "✍️ свой характер"
+    else:
+        preset_title = PERSONALITY_PRESETS.get(
+            settings.personality, PERSONALITY_PRESETS["realistic"]
+        )["title"]
     messages_count = await history_repo.count(user_id)
     facts_count = await memory_repo.count(user_id)
     now_msk = datetime.now(MSK)
@@ -118,7 +123,7 @@ async def cb_status(
     text = (
         "📋 текущие настройки\n\n"
         f"🤖 модель: {model}\n"
-        f"🎭 твой характер для неё: {preset['title']}\n\n"
+        f"🎭 твой характер для неё: {preset_title}\n\n"
         "📊 статистика\n\n"
         f"💬 сообщений в диалоге: {messages_count}/{config.short_memory_limit}\n"
         f"🧠 фактов о тебе в памяти: {facts_count}\n"
@@ -256,8 +261,10 @@ async def cb_personality(
 ) -> None:
     settings = await settings_repo.get(callback.from_user.id)
     await callback.message.edit_text(
-        "🎭 выбери характер:",
-        reply_markup=kb.personality_menu(settings.personality),
+        "🎭 выбери характер (только для тебя):",
+        reply_markup=kb.personality_menu(
+            settings.personality, bool(settings.custom_personality.strip())
+        ),
     )
     await callback.answer()
 
@@ -265,18 +272,63 @@ async def cb_personality(
 @router.callback_query(F.data.startswith("personality:"))
 async def cb_personality_set(
     callback: CallbackQuery,
+    state: FSMContext,
     settings_repo: UserSettingsRepository,
 ) -> None:
     key = callback.data.split(":", 1)[1]
+
+    # свой характер — FSM: ждём текстовое описание
+    if key == "custom":
+        settings = await settings_repo.get(callback.from_user.id)
+        current = settings.custom_personality.strip() or "не задан"
+        await state.set_state(SettingsStates.waiting_custom_personality)
+        await callback.message.edit_text(
+            f"✍️ твой характер для неё сейчас:\n«{current[:500]}»\n\n"
+            "опиши одним сообщением, какой она должна быть — "
+            "это заменит пресет и будет действовать только у тебя.\n"
+            "слово «сбросить» — вернуться к пресету «реалистичный»",
+            reply_markup=kb.cancel_prompt(),
+        )
+        await callback.answer()
+        return
+
     if key not in PERSONALITY_PRESETS:
         await callback.answer("неизвестный характер", show_alert=True)
         return
     await settings_repo.update(callback.from_user.id, personality=key)
     logger.info("user_id=%s event=personality_changed", callback.from_user.id)
     await callback.message.edit_text(
-        "🎭 выбери характер:", reply_markup=kb.personality_menu(key)
+        "🎭 выбери характер (только для тебя):",
+        reply_markup=kb.personality_menu(key),
     )
     await callback.answer("характер обновлён")
+
+
+@router.message(SettingsStates.waiting_custom_personality)
+async def msg_custom_personality(
+    message: Message,
+    state: FSMContext,
+    settings_repo: UserSettingsRepository,
+) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("нужно текстовое описание, попробуй ещё раз")
+        return
+    await state.clear()
+    if text.lower() == "сбросить":
+        await settings_repo.update(
+            message.from_user.id, personality="realistic", custom_personality=""
+        )
+        logger.info("user_id=%s event=custom_personality_cleared", message.from_user.id)
+        await message.answer("✍️ свой характер сброшен, снова пресет «реалистичный»",
+                             reply_markup=kb.back_to_menu())
+        return
+    await settings_repo.update(
+        message.from_user.id, personality="custom", custom_personality=text[:3000]
+    )
+    logger.info("user_id=%s event=custom_personality_set", message.from_user.id)
+    await message.answer("✍️ характер сохранён — теперь она такая только у тебя",
+                         reply_markup=kb.back_to_menu())
 
 
 # --- выбор модели (п. 16 ТЗ) ------------------------------------------------ #

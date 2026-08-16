@@ -7,3 +7,4 @@ class SettingsStates(StatesGroup):
     waiting_custom_prompt = State()
     confirm_clear_dialog = State()
     waiting_debounce = State()
+    waiting_custom_personality = State()

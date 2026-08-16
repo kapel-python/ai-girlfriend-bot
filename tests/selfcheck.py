@@ -245,6 +245,21 @@ async def manager_tests() -> None:
     await asyncio.sleep(1.0)
     check("manager: ошибка API обработана, менеджер жив", True)
 
+    # --- 4.4.1 характер: дефолт «реалистичный», свой характер --- #
+    from app.ai.prompts import PERSONALITY_PRESETS, build_system_prompt
+
+    check("personality: первый пресет — реалистичный",
+          next(iter(PERSONALITY_PRESETS)) == "realistic")
+    s_new = await settings_repo.get(4242)
+    check("personality: новый пользователь получает «реалистичный»",
+          s_new.personality == "realistic")
+    sp = build_system_prompt("custom", "", custom_personality="ты ворчливая библиотекарша")
+    check("personality: свой характер заменяет пресет",
+          "ворчливая библиотекарша" in sp and "реалистичный" not in sp.lower())
+    sp2 = build_system_prompt("realistic", "")
+    check("personality: пресет реалистичный подставляется",
+          "обычный собеседник в интернет чате" in sp2)
+
     # --- 4.5 настройки переживают «перезапуск» --- #
     await settings_repo.update(5, selected_model="gpt-5-mini", custom_prompt="будь милой")
     settings_repo2 = UserSettingsRepository(db, cfg.default_model, cfg.message_debounce)

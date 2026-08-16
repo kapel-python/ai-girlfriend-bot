@@ -52,13 +52,18 @@ def clear_confirm() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def personality_menu(current: str) -> InlineKeyboardMarkup:
+def personality_menu(current: str, has_custom: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for key, preset in PERSONALITY_PRESETS.items():
         mark = "✓ " if key == current else ""
         builder.row(InlineKeyboardButton(
             text=f"{mark}{preset['title']}", callback_data=f"personality:{key}"
         ))
+    custom_mark = "✓ " if current == "custom" else ""
+    custom_text = "✍️ свой характер"
+    if has_custom:
+        custom_text += " (задан)"
+    builder.row(InlineKeyboardButton(text=f"{custom_mark}{custom_text}", callback_data="personality:custom"))
     builder.row(InlineKeyboardButton(text="⬅️ назад", callback_data="menu:back"))
     return builder.as_markup()
 

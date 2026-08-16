@@ -84,7 +84,7 @@ async def ask(client: AIClient, model: str, context: list[dict], label: str) -> 
     return raw, parsed
 
 
-def base_context(personality="default", custom="", mood="") -> list[dict]:
+def base_context(personality="realistic", custom="", mood="") -> list[dict]:
     return [{"role": "system", "content": build_system_prompt(personality, custom, mood)}]
 
 

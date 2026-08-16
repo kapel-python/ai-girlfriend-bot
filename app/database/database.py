@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     user_id          INTEGER PRIMARY KEY,
     selected_model   TEXT    NOT NULL,
     custom_prompt    TEXT    NOT NULL DEFAULT '',
-    personality      TEXT    NOT NULL DEFAULT 'default',
+    personality      TEXT    NOT NULL DEFAULT 'realistic',
     typing_enabled   INTEGER NOT NULL DEFAULT 1,
     debounce_seconds REAL    NOT NULL DEFAULT 2.0,
     created_at       TEXT    NOT NULL,
@@ -59,5 +59,9 @@ async def init_db(path: str) -> aiosqlite.Connection:
         await db.execute("ALTER TABLE user_settings ADD COLUMN last_activity_ts REAL NOT NULL DEFAULT 0")
     if "last_chat_id" not in columns:
         await db.execute("ALTER TABLE user_settings ADD COLUMN last_chat_id INTEGER")
+    if "custom_personality" not in columns:
+        await db.execute("ALTER TABLE user_settings ADD COLUMN custom_personality TEXT NOT NULL DEFAULT ''")
+    # миграция характера: пресет «милая и живая» (бывший дефолт) → «реалистичный»
+    await db.execute("UPDATE user_settings SET personality = 'realistic' WHERE personality = 'default'")
     await db.commit()
     return db
