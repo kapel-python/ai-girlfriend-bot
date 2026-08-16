@@ -64,6 +64,7 @@ class ConversationManager:
         memory: MemoryService,
         settings_repo: UserSettingsRepository,
         history_repo: HistoryRepository,
+        global_repo=None,
     ):
         self._config = config
         self._ai = ai_client
@@ -71,6 +72,7 @@ class ConversationManager:
         self._memory = memory
         self._settings_repo = settings_repo
         self._history = history_repo
+        self._global = global_repo
         self._sessions: dict[int, UserSession] = {}
         self._proactive_task: asyncio.Task | None = None
 
@@ -145,9 +147,29 @@ class ConversationManager:
     # основной pipeline                                                   #
     # ------------------------------------------------------------------ #
 
-    async def _build_context(self, user_id: int, settings) -> list[dict]:
+    async def _runtime(self, settings) -> tuple[str, str, bool, float]:
+        """Глобальные параметры (модель, промт, typing, debounce) — одни на всех.
+
+        Характер, настроение, история и факты остаются per-user.
+        Fallback на per-user значения, если глобальный репозиторий не подключён.
+        """
+        if self._global is None:
+            return (
+                settings.selected_model,
+                settings.custom_prompt,
+                settings.typing_enabled,
+                settings.debounce_seconds,
+            )
+        return (
+            await self._global.get_str("selected_model"),
+            await self._global.get_str("custom_prompt"),
+            await self._global.get_bool("typing_enabled"),
+            await self._global.get_float("debounce_seconds"),
+        )
+
+    async def _build_context(self, user_id: int, settings, custom_prompt: str = "") -> list[dict]:
         system_prompt = build_system_prompt(
-            settings.personality, settings.custom_prompt, settings.mood
+            settings.personality, custom_prompt or settings.custom_prompt, settings.mood
         )
         context: list[dict] = [{"role": "system", "content": system_prompt}]
 
@@ -185,10 +207,11 @@ class ConversationManager:
 
         try:
             settings = await self._settings_repo.get(user_id)
-            typing_enabled = settings.typing_enabled and self._config.typing_simulation
+            model, custom_prompt, typing_glob, debounce = await self._runtime(settings)
+            typing_enabled = typing_glob and self._config.typing_simulation
 
             # --- debounce: ждём, пока пользователь допишет (п. 2 ТЗ) ---
-            await asyncio.sleep(settings.debounce_seconds)
+            await asyncio.sleep(debounce)
             if generation != session.generation_id or not session.buffer:
                 return
 
@@ -203,11 +226,11 @@ class ConversationManager:
 
             # --- генерация ответа (максимально быстро, без sleep — п. 3 ТЗ) ---
             logger.info("user_id=%s event=generation_started parts=%d", user_id, len(taken))
-            context = await self._build_context(user_id, settings)
+            context = await self._build_context(user_id, settings, custom_prompt)
             context.append({"role": "user", "content": user_text})
 
             raw = await self._ai.chat(
-                model=settings.selected_model, messages=context, json_mode=True
+                model=model, messages=context, json_mode=True
             )
             logger.info("user_id=%s event=generation_completed", user_id)
 
@@ -256,7 +279,7 @@ class ConversationManager:
             # долгосрочная память — фоном, не блокируя диалог
             asyncio.create_task(
                 self._memory.maybe_extract_facts(
-                    user_id, settings.selected_model, user_text, "\n".join(sent)
+                    user_id, model, user_text, "\n".join(sent)
                 )
             )
 
@@ -368,13 +391,14 @@ class ConversationManager:
         chat_id = session.last_chat_id
 
         settings = await self._settings_repo.get(user_id)
-        typing_enabled = settings.typing_enabled and cfg.typing_simulation
+        model, custom_prompt, typing_glob, _ = await self._runtime(settings)
+        typing_enabled = typing_glob and cfg.typing_simulation
 
         hours = idle_minutes / 60
         silence = f"{hours:.1f} часов" if hours >= 1 else f"{int(idle_minutes)} минут"
 
         logger.info("user_id=%s event=good_morning_started", user_id)
-        context = await self._build_context(user_id, settings)
+        context = await self._build_context(user_id, settings, custom_prompt)
         context.append({
             "role": "user",
             "content": MORNING_PROMPT.format(
@@ -385,7 +409,7 @@ class ConversationManager:
         typing_task: asyncio.Task | None = None
         try:
             raw = await self._ai.chat(
-                model=settings.selected_model, messages=context, json_mode=True
+                model=model, messages=context, json_mode=True
             )
             parsed = parse_response(raw)
             await self._save_mood(user_id, parsed.mood)
@@ -463,13 +487,14 @@ class ConversationManager:
         chat_id = session.last_chat_id
 
         settings = await self._settings_repo.get(user_id)
-        typing_enabled = settings.typing_enabled and self._config.typing_simulation
+        model, custom_prompt, typing_glob, _ = await self._runtime(settings)
+        typing_enabled = typing_glob and self._config.typing_simulation
 
         hours = idle_minutes / 60
         silence = f"{hours:.1f} часов" if hours >= 1 else f"{int(idle_minutes)} минут"
 
         logger.info("user_id=%s event=proactive_started stage=%d", user_id, stage + 1)
-        context = await self._build_context(user_id, settings)
+        context = await self._build_context(user_id, settings, custom_prompt)
         context.append({
             "role": "user",
             "content": PROACTIVE_STAGE_PROMPTS[stage].format(silence=silence),
@@ -478,7 +503,7 @@ class ConversationManager:
         typing_task: asyncio.Task | None = None
         try:
             raw = await self._ai.chat(
-                model=settings.selected_model, messages=context, json_mode=True
+                model=model, messages=context, json_mode=True
             )
             parsed = parse_response(raw)
             await self._save_mood(user_id, parsed.mood)

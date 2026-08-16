@@ -6,15 +6,30 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from app.ai.prompts import PERSONALITY_PRESETS
 
 
-def main_menu() -> InlineKeyboardMarkup:
+def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="💬 продолжить диалог", callback_data="menu:continue"))
     builder.row(InlineKeyboardButton(text="🧹 очистить диалог", callback_data="menu:clear"))
-    builder.row(InlineKeyboardButton(text="🧠 изменить промт", callback_data="menu:prompt"))
     builder.row(InlineKeyboardButton(text="🎭 настройки характера", callback_data="menu:personality"))
-    builder.row(InlineKeyboardButton(text="🤖 выбрать модель", callback_data="menu:model"))
-    builder.row(InlineKeyboardButton(text="⚙️ параметры", callback_data="menu:params"))
+    if is_admin:
+        # глобальные настройки — одни на всех пользователей
+        builder.row(InlineKeyboardButton(text="🧠 изменить промт (глобально)", callback_data="menu:prompt"))
+        builder.row(InlineKeyboardButton(text="🤖 выбрать модель (глобально)", callback_data="menu:model"))
+        builder.row(InlineKeyboardButton(text="⚙️ параметры (глобально)", callback_data="menu:params"))
     builder.row(InlineKeyboardButton(text="📋 текущие настройки", callback_data="menu:status"))
+    return builder.as_markup()
+
+
+def status_menu() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🧠 что она обо мне помнит", callback_data="status:facts"))
+    builder.row(InlineKeyboardButton(text="⬅️ назад", callback_data="menu:back"))
+    return builder.as_markup()
+
+
+def back_to_status() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="⬅️ назад", callback_data="menu:status"))
     return builder.as_markup()
 
 

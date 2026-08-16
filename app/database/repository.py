@@ -86,6 +86,51 @@ class UserSettingsRepository:
         return [await self.get(row["user_id"]) for row in rows]
 
 
+class GlobalSettingsRepository:
+    """Глобальные настройки бота (одни на всех): модель, промт, typing, debounce.
+
+    Меняет их только администратор; per-user остаются характер, настроение,
+    история и факты.
+    """
+
+    def __init__(self, db: aiosqlite.Connection, default_model: str, default_debounce: float):
+        self._db = db
+        self._defaults = {
+            "selected_model": default_model,
+            "custom_prompt": "",
+            "typing_enabled": "1",
+            "debounce_seconds": str(default_debounce),
+        }
+
+    async def get_str(self, key: str) -> str:
+        cursor = await self._db.execute(
+            "SELECT value FROM global_settings WHERE key = ?", (key,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return self._defaults.get(key, "")
+        return row["value"]
+
+    async def get_float(self, key: str) -> float:
+        try:
+            return float(await self.get_str(key))
+        except ValueError:
+            return float(self._defaults.get(key, "0") or 0)
+
+    async def get_bool(self, key: str) -> bool:
+        return (await self.get_str(key)).strip().lower() in {"1", "true", "yes", "on"}
+
+    async def set(self, key: str, value) -> None:
+        if isinstance(value, bool):
+            value = "1" if value else "0"
+        await self._db.execute(
+            "INSERT INTO global_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)),
+        )
+        await self._db.commit()
+
+
 class HistoryRepository:
     def __init__(self, db: aiosqlite.Connection):
         self._db = db

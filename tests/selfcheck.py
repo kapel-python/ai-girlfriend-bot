@@ -126,9 +126,11 @@ class FakeAI:
         self.replies = list(replies)
         self.delay = delay
         self.calls: list[list[dict]] = []
+        self.models: list[str] = []
 
     async def chat(self, model, messages, max_tokens=800, temperature=0.9, json_mode=False):
         self.calls.append(messages)
+        self.models.append(model)
         reply = self.replies.pop(0) if self.replies else '{"should_reply": true, "messages": ["ок"]}'
         await asyncio.sleep(self.delay)
         return reply
@@ -164,6 +166,7 @@ async def manager_tests() -> None:
         proactive_offense_min_minutes=0.001, proactive_offense_max_minutes=0.002,
         proactive_check_interval=0.2,
         morning_start_hour=0, morning_end_hour=23, morning_min_idle_minutes=999,
+        admin_ids=frozenset(),
     )
     tmp = tempfile.mktemp(suffix=".db")
     db = await init_db(tmp)
@@ -309,6 +312,7 @@ async def manager_tests() -> None:
         proactive_offense_min_minutes=999, proactive_offense_max_minutes=999,
         proactive_check_interval=999,
         morning_start_hour=0, morning_end_hour=23, morning_min_idle_minutes=999,
+        admin_ids=frozenset(),
     )
     ai9 = FakeAI([])
     sender9 = FakeSender()
@@ -359,6 +363,7 @@ async def manager_tests() -> None:
         proactive_offense_min_minutes=999, proactive_offense_max_minutes=999,
         proactive_check_interval=0.2,
         morning_start_hour=0, morning_end_hour=23, morning_min_idle_minutes=0.001,
+        admin_ids=frozenset(),
     )
     ai10 = FakeAI(['{"should_reply": true, "messages": ["споки)"], "mood": "сонное"}',
                    '{"should_reply": true, "messages": ["доброе утро) как спалось?"]}'])
@@ -377,6 +382,31 @@ async def manager_tests() -> None:
     count10 = len(sender10.sent)
     await asyncio.sleep(1.0)
     check("morning: одна попытка за утро, не спамит", len(sender10.sent) == count10)
+
+    # --- 4.9.1 глобальные настройки (одни на всех) --- #
+    from app.database.repository import GlobalSettingsRepository
+
+    global_repo = GlobalSettingsRepository(db, cfg.default_model, cfg.message_debounce)
+    check("global: дефолты из конфига",
+          (await global_repo.get_str("selected_model")) == "test-model"
+          and (await global_repo.get_bool("typing_enabled")) is True)
+    await global_repo.set("selected_model", "gpt-5-mini")
+    await global_repo.set("typing_enabled", False)
+    await global_repo.set("custom_prompt", "будь милой")
+    check("global: значения сохраняются",
+          (await global_repo.get_str("selected_model")) == "gpt-5-mini"
+          and (await global_repo.get_bool("typing_enabled")) is False
+          and (await global_repo.get_str("custom_prompt")) == "будь милой")
+
+    # менеджер с глобальным репозиторием берёт модель из него, а не из per-user
+    ai12 = FakeAI(['{"should_reply": true, "messages": ["ок"]}'])
+    manager12 = ConversationManager(cfg, ai12, FakeSender(),
+                                    MemoryService(ai12, history_repo, memory_repo, 20),
+                                    settings_repo, history_repo, global_repo)
+    await manager12.handle_message(12, 1200, "привет")
+    await asyncio.sleep(1.0)
+    check("global: менеджер использует глобальную модель",
+          ai12.models == ["gpt-5-mini"])
 
     # --- 4.10 сессии переживают «перезапуск» (last_activity в БД) --- #
     s11 = await settings_repo.get(10)

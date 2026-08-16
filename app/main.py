@@ -20,6 +20,7 @@ from app.conversation.memory import MemoryService
 from app.conversation.sender import TelegramSender
 from app.database.database import init_db
 from app.database.repository import (
+    GlobalSettingsRepository,
     HistoryRepository,
     MemoryRepository,
     UserSettingsRepository,
@@ -38,6 +39,7 @@ async def main() -> None:
     settings_repo = UserSettingsRepository(db, config.default_model, config.message_debounce)
     history_repo = HistoryRepository(db)
     memory_repo = MemoryRepository(db)
+    global_repo = GlobalSettingsRepository(db, config.default_model, config.message_debounce)
 
     ai_client = AIClient(config)
     model_registry = ModelRegistry(ai_client, config.default_model)
@@ -52,6 +54,7 @@ async def main() -> None:
         memory=memory,
         settings_repo=settings_repo,
         history_repo=history_repo,
+        global_repo=global_repo,
     )
 
     dp = Dispatcher(storage=MemoryStorage())
@@ -64,6 +67,8 @@ async def main() -> None:
     dp["memory_repo"] = memory_repo
     dp["model_registry"] = model_registry
     dp["ai_client"] = ai_client
+    dp["global_repo"] = global_repo
+    dp["config"] = config
 
     dp.include_router(build_router())
 

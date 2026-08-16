@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS memory_facts (
     created_at TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_facts_user ON memory_facts(user_id, id);
+
+CREATE TABLE IF NOT EXISTS global_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 

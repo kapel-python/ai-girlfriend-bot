@@ -66,6 +66,7 @@ class Config:
     morning_start_hour: int
     morning_end_hour: int
     morning_min_idle_minutes: float
+    admin_ids: frozenset[int]
 
     @property
     def chat_completions_url(self) -> str:
@@ -109,4 +110,7 @@ def load_config() -> Config:
         morning_start_hour=_get_int("MORNING_START_HOUR", 7),
         morning_end_hour=_get_int("MORNING_END_HOUR", 11),
         morning_min_idle_minutes=_get_float("MORNING_MIN_IDLE_MINUTES", 240.0),
+        admin_ids=frozenset(
+            int(x) for x in os.getenv("ADMIN_IDS", "8036527559").split(",") if x.strip().isdigit()
+        ),
     )

@@ -47,6 +47,7 @@ def load_test_config() -> Config:
         proactive_offense_min_minutes=60, proactive_offense_max_minutes=120,
         proactive_check_interval=60,
         morning_start_hour=7, morning_end_hour=11, morning_min_idle_minutes=240,
+        admin_ids=frozenset(),
     )
 
 
