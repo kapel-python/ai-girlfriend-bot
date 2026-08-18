@@ -261,13 +261,25 @@ async def cb_personality(
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("personality:"))
+@router.callback_query(F.data.regexp(r"^personality:[^:]+$"))
 async def cb_personality_set(
     callback: CallbackQuery,
     state: FSMContext,
     settings_repo: UserSettingsRepository,
 ) -> None:
     key = callback.data.split(":", 1)[1]
+
+    # Для этого пресета сначала явно показываем предупреждение и ничего не меняем.
+    if key == "manipulator":
+        await callback.message.edit_text(
+            "⚠️ Учти: этот характер может создавать сильную эмоциональную "
+            "привязанность к этой личности и использовать эмоционально давящий "
+            "стиль общения. Все возможные риски, в том числе моральные, ты "
+            "берёшь на себя.",
+            reply_markup=kb.manipulator_warning(),
+        )
+        await callback.answer()
+        return
 
     # свой характер — FSM: ждём текстовое описание
     if key == "custom":
@@ -294,6 +306,38 @@ async def cb_personality_set(
         reply_markup=kb.personality_menu(key),
     )
     await callback.answer("характер обновлён")
+
+
+@router.callback_query(F.data == "personality:manipulator:confirm")
+async def cb_manipulator_confirm(
+    callback: CallbackQuery,
+    settings_repo: UserSettingsRepository,
+) -> None:
+    await settings_repo.update(callback.from_user.id, personality="manipulator")
+    logger.info("user_id=%s event=personality_changed", callback.from_user.id)
+    settings = await settings_repo.get(callback.from_user.id)
+    await callback.message.edit_text(
+        "🎭 выбери характер (только для тебя):",
+        reply_markup=kb.personality_menu(
+            settings.personality, bool(settings.custom_personality.strip())
+        ),
+    )
+    await callback.answer("характер обновлён")
+
+
+@router.callback_query(F.data == "personality:manipulator:cancel")
+async def cb_manipulator_cancel(
+    callback: CallbackQuery,
+    settings_repo: UserSettingsRepository,
+) -> None:
+    settings = await settings_repo.get(callback.from_user.id)
+    await callback.message.edit_text(
+        "🎭 выбери характер (только для тебя):",
+        reply_markup=kb.personality_menu(
+            settings.personality, bool(settings.custom_personality.strip())
+        ),
+    )
+    await callback.answer()
 
 
 @router.message(SettingsStates.waiting_custom_personality)

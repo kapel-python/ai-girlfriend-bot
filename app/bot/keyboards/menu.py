@@ -67,6 +67,18 @@ def personality_menu(current: str, has_custom: bool = False) -> InlineKeyboardMa
     return builder.as_markup()
 
 
+def manipulator_warning() -> InlineKeyboardMarkup:
+    """Подтверждение дл�� характера с эмоционально давящим стилем."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(
+        text="✅ Применить", callback_data="personality:manipulator:confirm"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="❌ Назад", callback_data="personality:manipulator:cancel"
+    ))
+    return builder.as_markup()
+
+
 def models_menu(models: list[str], current: str, page: int = 0, per_page: int = 8) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     start = page * per_page
