@@ -79,6 +79,17 @@ def manipulator_warning() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def adult_warning() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(
+        text="✅ Мне есть 18 лет", callback_data="personality:18plus:confirm"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="❌ Назад", callback_data="personality:18plus:cancel"
+    ))
+    return builder.as_markup()
+
+
 def models_menu(models: list[str], current: str, page: int = 0, per_page: int = 8) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     start = page * per_page

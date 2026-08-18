@@ -281,6 +281,16 @@ async def cb_personality_set(
         await callback.answer()
         return
 
+    if key == "18plus":
+        await callback.message.edit_text(
+            "🔞 Этот характер предназначен только для совершеннолетних. "
+            "Он добавляет смелый романтический флирт, чувственные намёки и "
+            "двусмысленные поддразнивания. Подтверди, что тебе уже исполнилось 18 лет.",
+            reply_markup=kb.adult_warning(),
+        )
+        await callback.answer()
+        return
+
     # свой характер — FSM: ждём текстовое описание
     if key == "custom":
         settings = await settings_repo.get(callback.from_user.id)
@@ -327,6 +337,38 @@ async def cb_manipulator_confirm(
 
 @router.callback_query(F.data == "personality:manipulator:cancel")
 async def cb_manipulator_cancel(
+    callback: CallbackQuery,
+    settings_repo: UserSettingsRepository,
+) -> None:
+    settings = await settings_repo.get(callback.from_user.id)
+    await callback.message.edit_text(
+        "🎭 выбери характер (только для тебя):",
+        reply_markup=kb.personality_menu(
+            settings.personality, bool(settings.custom_personality.strip())
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "personality:18plus:confirm")
+async def cb_adult_confirm(
+    callback: CallbackQuery,
+    settings_repo: UserSettingsRepository,
+) -> None:
+    await settings_repo.update(callback.from_user.id, personality="18plus")
+    logger.info("user_id=%s event=personality_changed", callback.from_user.id)
+    settings = await settings_repo.get(callback.from_user.id)
+    await callback.message.edit_text(
+        "🎭 выбери характер (только для тебя):",
+        reply_markup=kb.personality_menu(
+            settings.personality, bool(settings.custom_personality.strip())
+        ),
+    )
+    await callback.answer("характер обновлён")
+
+
+@router.callback_query(F.data == "personality:18plus:cancel")
+async def cb_adult_cancel(
     callback: CallbackQuery,
     settings_repo: UserSettingsRepository,
 ) -> None:
