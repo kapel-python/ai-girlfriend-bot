@@ -299,10 +299,11 @@ async def cb_personality_admin_add(
 ) -> None:
     if not await _admin_only(callback, config):
         return
-    await state.set_state(SettingsStates.waiting_personality_create)
+    await state.clear()
+    await state.set_state(SettingsStates.waiting_personality_create_title)
     await callback.message.edit_text(
-        "➕ отправь описание нового характера одним сообщением.\n\n"
-        "это описание будет использоваться в ответах всем пользователям.",
+        "➕ введи название нового характера одним сообщением.\n\n"
+        "например: «умная» или «спокойная и заботливая».",
         reply_markup=kb.cancel_prompt(),
     )
     await callback.answer()
@@ -379,19 +380,16 @@ async def cb_personality_admin_edit(
 ) -> None:
     if not await _admin_only(callback, config):
         return
+    await state.clear()
     key = callback.data.rsplit(":", 1)[1]
     preset = await personality_repo.get(key)
     if preset is None:
         await callback.answer("характер уже удалён", show_alert=True)
         await _show_personality_admin_list(callback, personality_repo)
         return
-    await state.set_state(SettingsStates.waiting_personality_edit)
-    await state.update_data(personality_key=key)
     await callback.message.edit_text(
-        f"✏️ текущее описание «{escape(preset.title)}»:\n\n"
-        f"{escape(preset.prompt[:1000])}\n\n"
-        "отправь новое описание одним сообщением.",
-        reply_markup=kb.cancel_prompt(),
+        f"✏️ что изменить в характере «{escape(preset.title)}»?",
+        reply_markup=kb.personality_edit_menu(key),
     )
     await callback.answer()
 
@@ -439,8 +437,62 @@ async def cb_personality_admin_delete_confirm(
     await callback.answer("характер удалён")
 
 
-@router.message(SettingsStates.waiting_personality_create)
-async def msg_personality_create(
+@router.callback_query(F.data.regexp(r"^personality_admin:edit_title:[^:]+$"))
+async def cb_personality_admin_edit_title(
+    callback: CallbackQuery, state: FSMContext,
+    personality_repo: PersonalityRepository, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    await state.clear()
+    key = callback.data.rsplit(":", 1)[1]
+    preset = await personality_repo.get(key)
+    if preset is None:
+        await callback.answer("характер уже удалён", show_alert=True)
+        await _show_personality_admin_list(callback, personality_repo)
+        return
+    await state.set_state(SettingsStates.waiting_personality_edit_title)
+    await state.update_data(personality_key=key)
+    await callback.message.edit_text(
+        f"✏️ текущее имя: {escape(preset.title)}\n\n"
+        "отправь новое имя одним сообщением.",
+        reply_markup=kb.cancel_prompt(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^personality_admin:edit_prompt:[^:]+$"))
+async def cb_personality_admin_edit_prompt(
+    callback: CallbackQuery, state: FSMContext,
+    personality_repo: PersonalityRepository, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    await state.clear()
+    key = callback.data.rsplit(":", 1)[1]
+    preset = await personality_repo.get(key)
+    if preset is None:
+        await callback.answer("характер уже удалён", show_alert=True)
+        await _show_personality_admin_list(callback, personality_repo)
+        return
+    await state.set_state(SettingsStates.waiting_personality_edit_prompt)
+    await state.update_data(personality_key=key)
+    await callback.message.edit_text(
+        f"📝 текущее описание «{escape(preset.title)}»:\n\n"
+        f"{escape(preset.prompt[:1500])}\n\n"
+        "отправь новое описание одним сообщением.",
+        reply_markup=kb.cancel_prompt(),
+    )
+    await callback.answer()
+
+
+def _personality_title(value: str) -> str:
+    """Нормализуем отображаемое имя, не меняя его смысл и оформление."""
+    return " ".join(value.split())[:50]
+
+
+@router.message(SettingsStates.waiting_personality_create_title)
+async def msg_personality_create_title(
     message: Message, state: FSMContext, personality_repo: PersonalityRepository,
     config: Config,
 ) -> None:
@@ -449,12 +501,40 @@ async def msg_personality_create(
         return
     text = (message.text or "").strip()
     if not text:
-        await message.answer("нужно текстовое описание, попробуй ещё раз")
+        await message.answer("нужно название, попробуй ещё раз")
         return
-    # Ключ технический и стабильный; пользователю достаточно написать только описание.
+    title = _personality_title(text)
+    if not title:
+        await message.answer("нужно название, попробуй ещё раз")
+        return
+    await state.update_data(personality_title=title)
+    await state.set_state(SettingsStates.waiting_personality_create_prompt)
+    await message.answer(
+        "теперь отправь описание этого характера одним сообщением.",
+        reply_markup=kb.cancel_prompt(),
+    )
+
+
+@router.message(SettingsStates.waiting_personality_create_prompt)
+async def msg_personality_create_prompt(
+    message: Message, state: FSMContext, personality_repo: PersonalityRepository,
+    config: Config,
+) -> None:
+    if not _is_admin(config, message.from_user.id):
+        await state.clear()
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("нужно описание, попробуй ещё раз")
+        return
+    data = await state.get_data()
+    title = data.get("personality_title")
+    if not title:
+        await state.clear()
+        await message.answer("не удалось продолжить создание, начни заново",
+                             reply_markup=kb.back_to_menu())
+        return
     key = f"managed_{uuid4().hex[:12]}"
-    title_line = " ".join(text.splitlines()[0].split())
-    title = f"🎭 {title_line[:50]}"
     try:
         await personality_repo.create(key, title, text[:3000])
     except Exception:
@@ -469,8 +549,35 @@ async def msg_personality_create(
     )
 
 
-@router.message(SettingsStates.waiting_personality_edit)
-async def msg_personality_edit(
+async def _finish_personality_edit(
+    message: Message, state: FSMContext, personality_repo: PersonalityRepository,
+    key: str, *, title: str | None = None, prompt: str | None = None,
+) -> bool:
+    if await personality_repo.get(key) is None:
+        await state.clear()
+        await message.answer("характер уже удалён", reply_markup=kb.back_to_menu())
+        return False
+    try:
+        updated = await personality_repo.update(key, title=title, prompt=prompt)
+    except Exception:
+        logger.exception("user_id=%s event=personality_update_failed", message.from_user.id)
+        await message.answer("не удалось сохранить изменения, попробуй ещё раз")
+        return False
+    if updated is None:
+        await state.clear()
+        await message.answer("характер уже удалён", reply_markup=kb.back_to_menu())
+        return False
+    await state.clear()
+    logger.info("user_id=%s event=personality_updated key=%s", message.from_user.id, key)
+    await message.answer(
+        "✅ характер изменён",
+        reply_markup=kb.personality_admin_item(updated),
+    )
+    return True
+
+
+@router.message(SettingsStates.waiting_personality_edit_title)
+async def msg_personality_edit_title(
     message: Message, state: FSMContext, personality_repo: PersonalityRepository,
     config: Config,
 ) -> None:
@@ -479,27 +586,36 @@ async def msg_personality_edit(
         return
     text = (message.text or "").strip()
     if not text:
-        await message.answer("нужно текстовое описание, попробуй ещё раз")
+        await message.answer("нужно имя, попробуй ещё раз")
         return
-    data = await state.get_data()
-    key = data.get("personality_key")
-    if not key or await personality_repo.get(key) is None:
+    key = (await state.get_data()).get("personality_key")
+    if not key:
         await state.clear()
-        await message.answer("характер уже удалён", reply_markup=kb.back_to_menu())
+        await message.answer("не удалось определить характер", reply_markup=kb.back_to_menu())
         return
-    try:
-        title_line = " ".join(text.splitlines()[0].split())
-        await personality_repo.update(key, title=f"🎭 {title_line[:50]}", prompt=text[:3000])
-    except Exception:
-        logger.exception("user_id=%s event=personality_update_failed", message.from_user.id)
-        await message.answer("не удалось сохранить изменения, попробуй ещё раз")
-        return
-    await state.clear()
-    logger.info("user_id=%s event=personality_updated key=%s", message.from_user.id, key)
-    await message.answer(
-        "✅ описание характера изменено",
-        reply_markup=kb.personality_admin_menu(await personality_repo.list()),
+    await _finish_personality_edit(
+        message, state, personality_repo, key, title=_personality_title(text)
     )
+
+
+@router.message(SettingsStates.waiting_personality_edit_prompt)
+async def msg_personality_edit_prompt(
+    message: Message, state: FSMContext, personality_repo: PersonalityRepository,
+    config: Config,
+) -> None:
+    if not _is_admin(config, message.from_user.id):
+        await state.clear()
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("нужно описание, попробуй ещё раз")
+        return
+    key = (await state.get_data()).get("personality_key")
+    if not key:
+        await state.clear()
+        await message.answer("не удалось определить характер", reply_markup=kb.back_to_menu())
+        return
+    await _finish_personality_edit(message, state, personality_repo, key, prompt=text[:3000])
 
 
 @router.callback_query(F.data.regexp(r"^personality:[^:]+$"))

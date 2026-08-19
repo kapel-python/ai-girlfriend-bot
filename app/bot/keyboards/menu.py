@@ -107,6 +107,20 @@ def personality_admin_item(preset: PersonalityPreset) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def personality_edit_menu(key: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(
+        text="✏️ Изменить имя", callback_data=f"personality_admin:edit_title:{key}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="📝 Изменить описание", callback_data=f"personality_admin:edit_prompt:{key}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="⬅️ назад", callback_data=f"personality_admin:item:{key}"
+    ))
+    return builder.as_markup()
+
+
 def personality_delete_confirm(key: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(
