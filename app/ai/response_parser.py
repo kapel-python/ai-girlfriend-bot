@@ -27,6 +27,9 @@ class ParsedResponse:
     should_reply: bool
     messages: list[str] = field(default_factory=list)
     mood: str = ""
+    # Used only by the proactive DECISION request.  Normal replies leave it
+    # empty, so the existing reply/mood algorithm remains unchanged.
+    initiative: str = ""
 
 
 def split_fallback_text(text: str, max_parts: int = 3) -> list[str]:
@@ -105,6 +108,7 @@ def parse_response(raw: str) -> ParsedResponse:
     if isinstance(data, dict):
         should_reply = bool(data.get("should_reply", True))
         mood = str(data.get("mood") or "").strip()[:120]
+        initiative = str(data.get("initiative") or "").strip().upper()
         messages_raw = data.get("messages")
         if messages_raw is None and "reply" in data:
             messages_raw = [data["reply"]] if data["reply"] else []
@@ -151,8 +155,10 @@ def parse_response(raw: str) -> ParsedResponse:
         messages = unwrapped[:MAX_MESSAGES]
 
         if not should_reply or not messages:
-            return ParsedResponse(should_reply=False, mood=mood)
-        return ParsedResponse(should_reply=True, messages=messages, mood=mood)
+            return ParsedResponse(should_reply=False, mood=mood, initiative=initiative)
+        return ParsedResponse(
+            should_reply=True, messages=messages, mood=mood, initiative=initiative
+        )
 
     # верхний уровень: JSON сломан (например, неэкранированные кавычки),
     # но структура протокола видна — вытаскиваем сообщения регэкспом
@@ -175,6 +181,19 @@ def parse_response(raw: str) -> ParsedResponse:
     # fallback: модель вернула обычный текст — нарезаем на логические сообщения
     logger.info("Ответ модели не в JSON, используем fallback-режим")
     return ParsedResponse(should_reply=True, messages=split_fallback_text(text))
+
+
+def parse_initiative(raw: str) -> str:
+    """Parse the small, mood-free DECISION response.
+
+    Unknown/malformed values are treated as NO by the caller.  This keeps a
+    broken model response from becoming an unsolicited message.
+    """
+    data = _extract_json(raw.strip())
+    if not isinstance(data, dict):
+        return "NO"
+    value = str(data.get("initiative") or "").strip().upper()
+    return value if value in {"NO", "MAYBE", "YES"} else "NO"
 
 
 def parse_facts(raw: str) -> list[str] | None:

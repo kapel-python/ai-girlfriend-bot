@@ -59,6 +59,10 @@ async def init_db(path: str) -> aiosqlite.Connection:
         await db.execute("ALTER TABLE user_settings ADD COLUMN last_activity_ts REAL NOT NULL DEFAULT 0")
     if "last_chat_id" not in columns:
         await db.execute("ALTER TABLE user_settings ADD COLUMN last_chat_id INTEGER")
+    if "last_user_message_ts" not in columns:
+        await db.execute("ALTER TABLE user_settings ADD COLUMN last_user_message_ts REAL NOT NULL DEFAULT 0")
+    if "last_ai_message_ts" not in columns:
+        await db.execute("ALTER TABLE user_settings ADD COLUMN last_ai_message_ts REAL NOT NULL DEFAULT 0")
     if "custom_personality" not in columns:
         await db.execute("ALTER TABLE user_settings ADD COLUMN custom_personality TEXT NOT NULL DEFAULT ''")
     # миграция характера: пресет «милая и живая» (бывший дефолт) → «реалистичный»

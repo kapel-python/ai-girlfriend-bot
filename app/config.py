@@ -56,6 +56,8 @@ class Config:
     short_memory_limit: int
     database_path: str
     proactive_enabled: bool
+    # Legacy fields are retained for .env/database compatibility but are not
+    # used by the DECISION/TIMING scheduler.
     proactive_stage1_min_minutes: float
     proactive_stage1_max_minutes: float
     proactive_stage2_min_minutes: float
@@ -67,6 +69,12 @@ class Config:
     morning_end_hour: int
     morning_min_idle_minutes: float
     admin_ids: frozenset[int]
+    # Proactive timing is intentionally broad and sampled anew after every
+    # decision; the legacy stage ranges remain accepted for compatibility.
+    proactive_min_delay_minutes: float = 3.0
+    proactive_max_delay_minutes: float = 720.0
+    proactive_max_messages: int = 4
+    proactive_cooldown_minutes: float = 20.0
 
     @property
     def chat_completions_url(self) -> str:
@@ -113,4 +121,8 @@ def load_config() -> Config:
         admin_ids=frozenset(
             int(x) for x in os.getenv("ADMIN_IDS", "8036527559").split(",") if x.strip().isdigit()
         ),
+        proactive_min_delay_minutes=_get_float("PROACTIVE_MIN_DELAY_MINUTES", 3.0),
+        proactive_max_delay_minutes=_get_float("PROACTIVE_MAX_DELAY_MINUTES", 720.0),
+        proactive_max_messages=_get_int("PROACTIVE_MAX_MESSAGES", 4),
+        proactive_cooldown_minutes=_get_float("PROACTIVE_COOLDOWN_MINUTES", 20.0),
     )
