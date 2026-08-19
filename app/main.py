@@ -23,6 +23,7 @@ from app.database.repository import (
     GlobalSettingsRepository,
     HistoryRepository,
     MemoryRepository,
+    PersonalityRepository,
     UserSettingsRepository,
 )
 from app.logging_config import setup_logging
@@ -39,6 +40,7 @@ async def main() -> None:
     settings_repo = UserSettingsRepository(db, config.default_model, config.message_debounce)
     history_repo = HistoryRepository(db)
     memory_repo = MemoryRepository(db)
+    personality_repo = PersonalityRepository(db)
     global_repo = GlobalSettingsRepository(db, config.default_model, config.message_debounce)
 
     ai_client = AIClient(config)
@@ -55,6 +57,7 @@ async def main() -> None:
         settings_repo=settings_repo,
         history_repo=history_repo,
         global_repo=global_repo,
+        personality_repo=personality_repo,
     )
 
     dp = Dispatcher(storage=MemoryStorage())
@@ -68,6 +71,7 @@ async def main() -> None:
     dp["model_registry"] = model_registry
     dp["ai_client"] = ai_client
     dp["global_repo"] = global_repo
+    dp["personality_repo"] = personality_repo
     dp["config"] = config
 
     dp.include_router(build_router())

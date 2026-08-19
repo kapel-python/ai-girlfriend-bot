@@ -226,6 +226,7 @@ def build_system_prompt(
     custom_prompt: str,
     mood: str = "",
     custom_personality: str = "",
+    personality_prompt: str = "",
 ) -> str:
     """Собирает полный system prompt из слоёв: система + характер + настроение + custom."""
     parts = [SYSTEM_PROMPT]
@@ -235,7 +236,7 @@ def build_system_prompt(
         parts.append(f"\nТвой характер:\n{custom_personality.strip()}")
     else:
         preset = PERSONALITY_PRESETS.get(personality_key, PERSONALITY_PRESETS["realistic"])
-        parts.append(f"\nТвой характер:\n{preset['prompt']}")
+        parts.append(f"\nТвой характер:\n{personality_prompt.strip() or preset['prompt']}")
 
     if mood.strip():
         parts.append(f"\nТвоё настроение сейчас: {mood.strip()}. Учитывай его в тоне ответов.")

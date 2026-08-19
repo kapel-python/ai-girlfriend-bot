@@ -38,7 +38,7 @@ from app.ai.response_parser import parse_initiative, parse_response
 from app.config import MSK, Config
 from app.conversation.memory import MemoryService
 from app.conversation.sender import TelegramSender
-from app.database.repository import HistoryRepository, UserSettingsRepository
+from app.database.repository import HistoryRepository, PersonalityRepository, UserSettingsRepository
 from app.time_context import TIMEZONE_NAME, elapsed, iso, now
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,7 @@ class ConversationManager:
         settings_repo: UserSettingsRepository,
         history_repo: HistoryRepository,
         global_repo=None,
+        personality_repo: PersonalityRepository | None = None,
     ):
         self._config = config
         self._ai = ai_client
@@ -84,6 +85,7 @@ class ConversationManager:
         self._settings_repo = settings_repo
         self._history = history_repo
         self._global = global_repo
+        self._personalities = personality_repo
         self._sessions: dict[int, UserSession] = {}
         self._proactive_task: asyncio.Task | None = None
 
@@ -217,11 +219,16 @@ class ConversationManager:
         last_user_at: datetime | None = None,
         last_ai_at: datetime | None = None,
     ) -> list[dict]:
+        personality_prompt = ""
+        if self._personalities is not None and settings.personality != "custom":
+            preset = await self._personalities.get(settings.personality)
+            personality_prompt = preset.prompt if preset else ""
         system_prompt = build_system_prompt(
             settings.personality,
             custom_prompt or settings.custom_prompt,
             settings.mood,
             getattr(settings, "custom_personality", ""),
+            personality_prompt=personality_prompt,
         )
         context: list[dict] = [{"role": "system", "content": system_prompt}]
 

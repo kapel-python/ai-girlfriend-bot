@@ -26,6 +26,17 @@ class UserSettings:
 
 
 @dataclass
+class PersonalityPreset:
+    """Глобальный характер, доступный всем пользователям."""
+
+    key: str
+    title: str
+    prompt: str
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
 class HistoryMessage:
     user_id: int
     role: str            # "user" | "assistant"

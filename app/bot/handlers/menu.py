@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from html import escape
+from uuid import uuid4
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
@@ -10,7 +12,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.ai.models import ModelRegistry
-from app.ai.prompts import PERSONALITY_PRESETS
 from app.bot.keyboards import menu as kb
 from app.bot.states.settings import SettingsStates
 from app.config import Config
@@ -19,6 +20,7 @@ from app.database.repository import (
     GlobalSettingsRepository,
     HistoryRepository,
     MemoryRepository,
+    PersonalityRepository,
     UserSettingsRepository,
 )
 
@@ -92,6 +94,7 @@ async def cb_status(
     history_repo: HistoryRepository,
     memory_repo: MemoryRepository,
     global_repo: GlobalSettingsRepository,
+    personality_repo: PersonalityRepository,
     ai_client: "AIClient",
     config: Config,
 ) -> None:
@@ -104,9 +107,8 @@ async def cb_status(
     if settings.personality == "custom":
         preset_title = "✍️ свой характер"
     else:
-        preset_title = PERSONALITY_PRESETS.get(
-            settings.personality, PERSONALITY_PRESETS["realistic"]
-        )["title"]
+        preset = await personality_repo.get(settings.personality)
+        preset_title = escape(preset.title) if preset else "🎧 реалистичный"
     messages_count = await history_repo.count(user_id)
     facts_count = await memory_repo.count(user_id)
     now_msk = datetime.now(MSK)
@@ -249,16 +251,255 @@ async def msg_new_prompt(
 @router.callback_query(F.data == "menu:personality")
 async def cb_personality(
     callback: CallbackQuery,
+    state: FSMContext,
     settings_repo: UserSettingsRepository,
+    personality_repo: PersonalityRepository,
+    config: Config,
 ) -> None:
+    await state.clear()
     settings = await settings_repo.get(callback.from_user.id)
+    personalities = await personality_repo.list()
     await callback.message.edit_text(
         "🎭 выбери характер (только для тебя):",
         reply_markup=kb.personality_menu(
-            settings.personality, bool(settings.custom_personality.strip())
+            personalities, settings.personality,
+            bool(settings.custom_personality.strip()), _is_admin(config, callback.from_user.id),
         ),
     )
     await callback.answer()
+
+
+# --- управление глобальными характерами (только разработчик) ------------- #
+
+async def _show_personality_admin_list(
+    callback: CallbackQuery, personality_repo: PersonalityRepository,
+) -> None:
+    personalities = await personality_repo.list()
+    await callback.message.edit_text(
+        "⚙️ настройки характера\n\nвыбери характер для управления:",
+        reply_markup=kb.personality_admin_menu(personalities),
+    )
+
+
+@router.callback_query(F.data == "personality_admin:manage")
+async def cb_personality_admin_manage(
+    callback: CallbackQuery, state: FSMContext,
+    personality_repo: PersonalityRepository, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    await state.clear()
+    await _show_personality_admin_list(callback, personality_repo)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "personality_admin:add")
+async def cb_personality_admin_add(
+    callback: CallbackQuery, state: FSMContext, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    await state.set_state(SettingsStates.waiting_personality_create)
+    await callback.message.edit_text(
+        "➕ отправь описание нового характера одним сообщением.\n\n"
+        "это описание будет использоваться в ответах всем пользователям.",
+        reply_markup=kb.cancel_prompt(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^personality_admin:item:[^:]+$"))
+async def cb_personality_admin_item(
+    callback: CallbackQuery, state: FSMContext,
+    personality_repo: PersonalityRepository, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    await state.clear()
+    key = callback.data.rsplit(":", 1)[1]
+    preset = await personality_repo.get(key)
+    if preset is None:
+        await callback.answer("характер уже удалён", show_alert=True)
+        await _show_personality_admin_list(callback, personality_repo)
+        return
+    await callback.message.edit_text(
+        f"🎭 {escape(preset.title)}\n\nвыбери действие:",
+        reply_markup=kb.personality_admin_item(preset),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^personality_admin:view:[^:]+$"))
+async def cb_personality_admin_view(
+    callback: CallbackQuery, state: FSMContext,
+    personality_repo: PersonalityRepository, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    await state.clear()
+    key = callback.data.rsplit(":", 1)[1]
+    preset = await personality_repo.get(key)
+    if preset is None:
+        await callback.answer("характер уже удалён", show_alert=True)
+        await _show_personality_admin_list(callback, personality_repo)
+        return
+    await callback.message.edit_text(
+        f"👁 {escape(preset.title)}\n\n{escape(preset.prompt[:3800])}",
+        reply_markup=kb.personality_admin_item(preset),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^personality_admin:stats:[^:]+$"))
+async def cb_personality_admin_stats(
+    callback: CallbackQuery, state: FSMContext,
+    personality_repo: PersonalityRepository, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    await state.clear()
+    key = callback.data.rsplit(":", 1)[1]
+    preset = await personality_repo.get(key)
+    if preset is None:
+        await callback.answer("характер уже удалён", show_alert=True)
+        await _show_personality_admin_list(callback, personality_repo)
+        return
+    count = await personality_repo.usage_count(key)
+    await callback.message.edit_text(
+        f"📊 {escape(preset.title)}\n\nактивно выбрали: {count} пользователей",
+        reply_markup=kb.personality_admin_item(preset),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^personality_admin:edit:[^:]+$"))
+async def cb_personality_admin_edit(
+    callback: CallbackQuery, state: FSMContext,
+    personality_repo: PersonalityRepository, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    key = callback.data.rsplit(":", 1)[1]
+    preset = await personality_repo.get(key)
+    if preset is None:
+        await callback.answer("характер уже удалён", show_alert=True)
+        await _show_personality_admin_list(callback, personality_repo)
+        return
+    await state.set_state(SettingsStates.waiting_personality_edit)
+    await state.update_data(personality_key=key)
+    await callback.message.edit_text(
+        f"✏️ текущее описание «{escape(preset.title)}»:\n\n"
+        f"{escape(preset.prompt[:1000])}\n\n"
+        "отправь новое описание одним сообщением.",
+        reply_markup=kb.cancel_prompt(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^personality_admin:delete:[^:]+$"))
+async def cb_personality_admin_delete(
+    callback: CallbackQuery, state: FSMContext,
+    personality_repo: PersonalityRepository, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    await state.clear()
+    key = callback.data.rsplit(":", 1)[1]
+    preset = await personality_repo.get(key)
+    if preset is None:
+        await callback.answer("характер уже удалён", show_alert=True)
+        await _show_personality_admin_list(callback, personality_repo)
+        return
+    await callback.message.edit_text(
+        f"🗑 удалить характер «{escape(preset.title)}»?\n\n"
+        "пользователи, которые его выбрали, будут переведены на другой характер.",
+        reply_markup=kb.personality_delete_confirm(key),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^personality_admin:delete_confirm:[^:]+$"))
+async def cb_personality_admin_delete_confirm(
+    callback: CallbackQuery, state: FSMContext,
+    personality_repo: PersonalityRepository, config: Config,
+) -> None:
+    if not await _admin_only(callback, config):
+        return
+    await state.clear()
+    key = callback.data.rsplit(":", 1)[1]
+    if await personality_repo.get(key) is None:
+        await _show_personality_admin_list(callback, personality_repo)
+        await callback.answer("характер уже удалён")
+        return
+    deleted = await personality_repo.delete(key)
+    if not deleted:
+        await callback.answer("характер уже удалён", show_alert=True)
+        return
+    await _show_personality_admin_list(callback, personality_repo)
+    await callback.answer("характер удалён")
+
+
+@router.message(SettingsStates.waiting_personality_create)
+async def msg_personality_create(
+    message: Message, state: FSMContext, personality_repo: PersonalityRepository,
+    config: Config,
+) -> None:
+    if not _is_admin(config, message.from_user.id):
+        await state.clear()
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("нужно текстовое описание, попробуй ещё раз")
+        return
+    # Ключ технический и стабильный; пользователю достаточно написать только описание.
+    key = f"managed_{uuid4().hex[:12]}"
+    title_line = " ".join(text.splitlines()[0].split())
+    title = f"🎭 {title_line[:50]}"
+    try:
+        await personality_repo.create(key, title, text[:3000])
+    except Exception:
+        logger.exception("user_id=%s event=personality_create_failed", message.from_user.id)
+        await message.answer("не удалось сохранить характер, попробуй ещё раз")
+        return
+    await state.clear()
+    logger.info("user_id=%s event=personality_created key=%s", message.from_user.id, key)
+    await message.answer(
+        "✅ характер добавлен",
+        reply_markup=kb.personality_admin_menu(await personality_repo.list()),
+    )
+
+
+@router.message(SettingsStates.waiting_personality_edit)
+async def msg_personality_edit(
+    message: Message, state: FSMContext, personality_repo: PersonalityRepository,
+    config: Config,
+) -> None:
+    if not _is_admin(config, message.from_user.id):
+        await state.clear()
+        return
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("нужно текстовое описание, попробуй ещё раз")
+        return
+    data = await state.get_data()
+    key = data.get("personality_key")
+    if not key or await personality_repo.get(key) is None:
+        await state.clear()
+        await message.answer("характер уже удалён", reply_markup=kb.back_to_menu())
+        return
+    try:
+        title_line = " ".join(text.splitlines()[0].split())
+        await personality_repo.update(key, title=f"🎭 {title_line[:50]}", prompt=text[:3000])
+    except Exception:
+        logger.exception("user_id=%s event=personality_update_failed", message.from_user.id)
+        await message.answer("не удалось сохранить изменения, попробуй ещё раз")
+        return
+    await state.clear()
+    logger.info("user_id=%s event=personality_updated key=%s", message.from_user.id, key)
+    await message.answer(
+        "✅ описание характера изменено",
+        reply_markup=kb.personality_admin_menu(await personality_repo.list()),
+    )
 
 
 @router.callback_query(F.data.regexp(r"^personality:[^:]+$"))
@@ -266,6 +507,8 @@ async def cb_personality_set(
     callback: CallbackQuery,
     state: FSMContext,
     settings_repo: UserSettingsRepository,
+    personality_repo: PersonalityRepository,
+    config: Config,
 ) -> None:
     key = callback.data.split(":", 1)[1]
 
@@ -306,14 +549,19 @@ async def cb_personality_set(
         await callback.answer()
         return
 
-    if key not in PERSONALITY_PRESETS:
+    preset = await personality_repo.get(key)
+    if preset is None:
         await callback.answer("неизвестный характер", show_alert=True)
         return
     await settings_repo.update(callback.from_user.id, personality=key)
     logger.info("user_id=%s event=personality_changed", callback.from_user.id)
     await callback.message.edit_text(
         "🎭 выбери характер (только для тебя):",
-        reply_markup=kb.personality_menu(key),
+        reply_markup=kb.personality_menu(
+            await personality_repo.list(), key,
+            bool((await settings_repo.get(callback.from_user.id)).custom_personality.strip()),
+            _is_admin(config, callback.from_user.id),
+        ),
     )
     await callback.answer("характер обновлён")
 
@@ -322,15 +570,20 @@ async def cb_personality_set(
 async def cb_manipulator_confirm(
     callback: CallbackQuery,
     settings_repo: UserSettingsRepository,
+    personality_repo: PersonalityRepository,
+    config: Config,
 ) -> None:
+    if await personality_repo.get("manipulator") is None:
+        await callback.answer("характер уже удалён", show_alert=True)
+        return
     await settings_repo.update(callback.from_user.id, personality="manipulator")
     logger.info("user_id=%s event=personality_changed", callback.from_user.id)
     settings = await settings_repo.get(callback.from_user.id)
     await callback.message.edit_text(
         "🎭 выбери характер (только для тебя):",
-        reply_markup=kb.personality_menu(
-            settings.personality, bool(settings.custom_personality.strip())
-        ),
+        reply_markup=kb.personality_menu(await personality_repo.list(), settings.personality,
+                                         bool(settings.custom_personality.strip()),
+                                         _is_admin(config, callback.from_user.id)),
     )
     await callback.answer("характер обновлён")
 
@@ -339,13 +592,15 @@ async def cb_manipulator_confirm(
 async def cb_manipulator_cancel(
     callback: CallbackQuery,
     settings_repo: UserSettingsRepository,
+    personality_repo: PersonalityRepository,
+    config: Config,
 ) -> None:
     settings = await settings_repo.get(callback.from_user.id)
     await callback.message.edit_text(
         "🎭 выбери характер (только для тебя):",
-        reply_markup=kb.personality_menu(
-            settings.personality, bool(settings.custom_personality.strip())
-        ),
+        reply_markup=kb.personality_menu(await personality_repo.list(), settings.personality,
+                                         bool(settings.custom_personality.strip()),
+                                         _is_admin(config, callback.from_user.id)),
     )
     await callback.answer()
 
@@ -354,15 +609,20 @@ async def cb_manipulator_cancel(
 async def cb_adult_confirm(
     callback: CallbackQuery,
     settings_repo: UserSettingsRepository,
+    personality_repo: PersonalityRepository,
+    config: Config,
 ) -> None:
+    if await personality_repo.get("18plus") is None:
+        await callback.answer("характер уже удалён", show_alert=True)
+        return
     await settings_repo.update(callback.from_user.id, personality="18plus")
     logger.info("user_id=%s event=personality_changed", callback.from_user.id)
     settings = await settings_repo.get(callback.from_user.id)
     await callback.message.edit_text(
         "🎭 выбери характер (только для тебя):",
-        reply_markup=kb.personality_menu(
-            settings.personality, bool(settings.custom_personality.strip())
-        ),
+        reply_markup=kb.personality_menu(await personality_repo.list(), settings.personality,
+                                         bool(settings.custom_personality.strip()),
+                                         _is_admin(config, callback.from_user.id)),
     )
     await callback.answer("характер обновлён")
 
@@ -371,13 +631,15 @@ async def cb_adult_confirm(
 async def cb_adult_cancel(
     callback: CallbackQuery,
     settings_repo: UserSettingsRepository,
+    personality_repo: PersonalityRepository,
+    config: Config,
 ) -> None:
     settings = await settings_repo.get(callback.from_user.id)
     await callback.message.edit_text(
         "🎭 выбери характер (только для тебя):",
-        reply_markup=kb.personality_menu(
-            settings.personality, bool(settings.custom_personality.strip())
-        ),
+        reply_markup=kb.personality_menu(await personality_repo.list(), settings.personality,
+                                         bool(settings.custom_personality.strip()),
+                                         _is_admin(config, callback.from_user.id)),
     )
     await callback.answer()
 
@@ -387,6 +649,7 @@ async def msg_custom_personality(
     message: Message,
     state: FSMContext,
     settings_repo: UserSettingsRepository,
+    personality_repo: PersonalityRepository,
 ) -> None:
     text = (message.text or "").strip()
     if not text:
@@ -394,11 +657,14 @@ async def msg_custom_personality(
         return
     await state.clear()
     if text.lower() == "сбросить":
+        default_key = await personality_repo.default_key() or "realistic"
+        default_preset = await personality_repo.get(default_key)
         await settings_repo.update(
-            message.from_user.id, personality="realistic", custom_personality=""
+            message.from_user.id, personality=default_key, custom_personality=""
         )
         logger.info("user_id=%s event=custom_personality_cleared", message.from_user.id)
-        await message.answer("✍️ свой характер сброшен, снова пресет «реалистичный»",
+        default_title = default_preset.title if default_preset else "🎧 реалистичный"
+        await message.answer(f"✍️ свой характер сброшен, снова пресет «{default_title}»",
                              reply_markup=kb.back_to_menu())
         return
     await settings_repo.update(

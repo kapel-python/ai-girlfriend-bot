@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import aiosqlite
 
-from app.database.models import HistoryMessage, MemoryFact, UserSettings
+from app.database.models import HistoryMessage, MemoryFact, PersonalityPreset, UserSettings
 
 
 def _now() -> str:
@@ -52,12 +52,22 @@ class UserSettingsRepository:
 
     async def _create_default(self, user_id: int) -> UserSettings:
         now = _now()
+        cursor = await self._db.execute(
+            "SELECT key FROM personality_presets WHERE key = 'realistic'"
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            cursor = await self._db.execute(
+                "SELECT key FROM personality_presets ORDER BY created_at, key LIMIT 1"
+            )
+            row = await cursor.fetchone()
+        personality = row["key"] if row else "realistic"
         await self._db.execute(
             """INSERT INTO user_settings
                (user_id, selected_model, custom_prompt, personality,
                 typing_enabled, debounce_seconds, created_at, updated_at)
-               VALUES (?, ?, '', 'realistic', 1, ?, ?, ?)""",
-            (user_id, self._default_model, self._default_debounce, now, now),
+               VALUES (?, ?, '', ?, 1, ?, ?, ?)""",
+            (user_id, self._default_model, personality, self._default_debounce, now, now),
         )
         await self._db.commit()
         return await self.get(user_id)
@@ -94,6 +104,114 @@ class UserSettingsRepository:
         )
         rows = await cursor.fetchall()
         return [await self.get(row["user_id"]) for row in rows]
+
+
+class PersonalityRepository:
+    """Хранилище глобальных характеров и их использования."""
+
+    def __init__(self, db: aiosqlite.Connection):
+        self._db = db
+
+    @staticmethod
+    def _model(row) -> PersonalityPreset:
+        return PersonalityPreset(
+            key=row["key"], title=row["title"], prompt=row["prompt"],
+            created_at=_parse_datetime(row["created_at"]),
+            updated_at=_parse_datetime(row["updated_at"]),
+        )
+
+    async def list(self) -> list[PersonalityPreset]:
+        cursor = await self._db.execute(
+            "SELECT * FROM personality_presets ORDER BY created_at, key"
+        )
+        return [self._model(row) for row in await cursor.fetchall()]
+
+    async def get(self, key: str) -> PersonalityPreset | None:
+        cursor = await self._db.execute(
+            "SELECT * FROM personality_presets WHERE key = ?", (key,)
+        )
+        row = await cursor.fetchone()
+        return self._model(row) if row else None
+
+    async def default_key(self, exclude: str | None = None) -> str | None:
+        if exclude != "realistic":
+            cursor = await self._db.execute(
+                "SELECT key FROM personality_presets WHERE key = 'realistic'"
+            )
+            row = await cursor.fetchone()
+            if row:
+                return row["key"]
+        query = "SELECT key FROM personality_presets"
+        params: tuple[str, ...] = ()
+        if exclude is not None:
+            query += " WHERE key <> ?"
+            params = (exclude,)
+        query += " ORDER BY created_at, key LIMIT 1"
+        cursor = await self._db.execute(query, params)
+        row = await cursor.fetchone()
+        return row["key"] if row else None
+
+    async def create(self, key: str, title: str, prompt: str) -> PersonalityPreset:
+        now = _now()
+        await self._db.execute(
+            """INSERT INTO personality_presets
+               (key, title, prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?)""",
+            (key, title, prompt, now, now),
+        )
+        await self._db.commit()
+        result = await self.get(key)
+        if result is None:  # pragma: no cover - defensive guard
+            raise RuntimeError("характер не найден после сохранения")
+        return result
+
+    async def update(self, key: str, *, title: str | None = None,
+                     prompt: str | None = None) -> PersonalityPreset | None:
+        fields = {}
+        if title is not None:
+            fields["title"] = title
+        if prompt is not None:
+            fields["prompt"] = prompt
+        if not fields:
+            return await self.get(key)
+        fields["updated_at"] = _now()
+        clause = ", ".join(f"{field} = ?" for field in fields)
+        await self._db.execute(
+            f"UPDATE personality_presets SET {clause} WHERE key = ?",
+            (*fields.values(), key),
+        )
+        await self._db.commit()
+        return await self.get(key)
+
+    async def delete(self, key: str) -> bool:
+        # Удалённый характер больше не должен оставаться выбором пользователя.
+        # Если это был последний характер, переводим пользователей в пустой
+        # custom-state: ConversationManager использует свой штатный fallback,
+        # а разработчик всё равно может сразу добавить новый характер.
+        fallback_key = await self.default_key(exclude=key)
+        if fallback_key is None:
+            await self._db.execute(
+                """UPDATE user_settings
+                   SET personality = 'custom', custom_personality = ''
+                   WHERE personality = ?""",
+                (key,),
+            )
+        else:
+            await self._db.execute(
+                "UPDATE user_settings SET personality = ? WHERE personality = ?",
+                (fallback_key, key),
+            )
+        cursor = await self._db.execute(
+            "DELETE FROM personality_presets WHERE key = ?", (key,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def usage_count(self, key: str) -> int:
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) AS count FROM user_settings WHERE personality = ?", (key,)
+        )
+        row = await cursor.fetchone()
+        return int(row["count"])
 
 
 class GlobalSettingsRepository:

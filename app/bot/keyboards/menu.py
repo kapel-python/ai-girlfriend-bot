@@ -3,7 +3,7 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.ai.prompts import PERSONALITY_PRESETS
+from app.database.models import PersonalityPreset
 
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
@@ -51,12 +51,19 @@ def clear_confirm() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def personality_menu(current: str, has_custom: bool = False) -> InlineKeyboardMarkup:
+def personality_menu(
+    personalities: list[PersonalityPreset], current: str, has_custom: bool = False,
+    is_admin: bool = False,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for key, preset in PERSONALITY_PRESETS.items():
-        mark = "✓ " if key == current else ""
+    if is_admin:
         builder.row(InlineKeyboardButton(
-            text=f"{mark}{preset['title']}", callback_data=f"personality:{key}"
+            text="⚙️ Настройки характера", callback_data="personality_admin:manage"
+        ))
+    for preset in personalities:
+        mark = "✓ " if preset.key == current else ""
+        builder.row(InlineKeyboardButton(
+            text=f"{mark}{preset.title}", callback_data=f"personality:{preset.key}"
         ))
     custom_mark = "✓ " if current == "custom" else ""
     custom_text = "✍️ свой характер"
@@ -64,6 +71,50 @@ def personality_menu(current: str, has_custom: bool = False) -> InlineKeyboardMa
         custom_text += " (задан)"
     builder.row(InlineKeyboardButton(text=f"{custom_mark}{custom_text}", callback_data="personality:custom"))
     builder.row(InlineKeyboardButton(text="⬅️ назад", callback_data="menu:back"))
+    return builder.as_markup()
+
+
+def personality_admin_menu(personalities: list[PersonalityPreset]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(
+        text="➕ Добавить характер", callback_data="personality_admin:add"
+    ))
+    for preset in personalities:
+        builder.row(InlineKeyboardButton(
+            text=preset.title, callback_data=f"personality_admin:item:{preset.key}"
+        ))
+    builder.row(InlineKeyboardButton(text="⬅️ назад", callback_data="menu:personality"))
+    return builder.as_markup()
+
+
+def personality_admin_item(preset: PersonalityPreset) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(
+        text="👁 Просмотр описания", callback_data=f"personality_admin:view:{preset.key}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="✏️ Изменить", callback_data=f"personality_admin:edit:{preset.key}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="🗑 Удалить", callback_data=f"personality_admin:delete:{preset.key}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="📊 Статистика", callback_data=f"personality_admin:stats:{preset.key}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="⬅️ к списку", callback_data="personality_admin:manage"
+    ))
+    return builder.as_markup()
+
+
+def personality_delete_confirm(key: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(
+        text="✅ Да, удалить", callback_data=f"personality_admin:delete_confirm:{key}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="❌ Отмена", callback_data=f"personality_admin:item:{key}"
+    ))
     return builder.as_markup()
 
 

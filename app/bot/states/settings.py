@@ -8,3 +8,5 @@ class SettingsStates(StatesGroup):
     confirm_clear_dialog = State()
     waiting_debounce = State()
     waiting_custom_personality = State()
+    waiting_personality_create = State()
+    waiting_personality_edit = State()
