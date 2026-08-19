@@ -52,22 +52,12 @@ class UserSettingsRepository:
 
     async def _create_default(self, user_id: int) -> UserSettings:
         now = _now()
-        cursor = await self._db.execute(
-            "SELECT key FROM personality_presets WHERE key = 'realistic'"
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            cursor = await self._db.execute(
-                "SELECT key FROM personality_presets ORDER BY created_at, key LIMIT 1"
-            )
-            row = await cursor.fetchone()
-        personality = row["key"] if row else "realistic"
         await self._db.execute(
             """INSERT INTO user_settings
                (user_id, selected_model, custom_prompt, personality,
                 typing_enabled, debounce_seconds, created_at, updated_at)
                VALUES (?, ?, '', ?, 1, ?, ?, ?)""",
-            (user_id, self._default_model, personality, self._default_debounce, now, now),
+            (user_id, self._default_model, "realistic", self._default_debounce, now, now),
         )
         await self._db.commit()
         return await self.get(user_id)
@@ -134,22 +124,8 @@ class PersonalityRepository:
         return self._model(row) if row else None
 
     async def default_key(self, exclude: str | None = None) -> str | None:
-        if exclude != "realistic":
-            cursor = await self._db.execute(
-                "SELECT key FROM personality_presets WHERE key = 'realistic'"
-            )
-            row = await cursor.fetchone()
-            if row:
-                return row["key"]
-        query = "SELECT key FROM personality_presets"
-        params: tuple[str, ...] = ()
-        if exclude is not None:
-            query += " WHERE key <> ?"
-            params = (exclude,)
-        query += " ORDER BY created_at, key LIMIT 1"
-        cursor = await self._db.execute(query, params)
-        row = await cursor.fetchone()
-        return row["key"] if row else None
+        """Ключ штатного fallback; не зависит от состава управляемого списка."""
+        return None if exclude == "realistic" else "realistic"
 
     async def create(self, key: str, title: str, prompt: str) -> PersonalityPreset:
         now = _now()
@@ -183,23 +159,15 @@ class PersonalityRepository:
         return await self.get(key)
 
     async def delete(self, key: str) -> bool:
-        # Удалённый характер больше не должен оставаться выбором пользователя.
-        # Если это был последний характер, переводим пользователей в пустой
-        # custom-state: ConversationManager использует свой штатный fallback,
-        # а разработчик всё равно может сразу добавить новый характер.
-        fallback_key = await self.default_key(exclude=key)
-        if fallback_key is None:
-            await self._db.execute(
-                """UPDATE user_settings
-                   SET personality = 'custom', custom_personality = ''
-                   WHERE personality = ?""",
-                (key,),
-            )
-        else:
-            await self._db.execute(
-                "UPDATE user_settings SET personality = ? WHERE personality = ?",
-                (fallback_key, key),
-            )
+        # Любой удалённый характер, включая realistic, переводит пользователей
+        # на единый штатный fallback realistic. Если записи realistic уже нет,
+        # ConversationManager использует встроенный fallback-промт.
+        await self._db.execute(
+            """UPDATE user_settings
+               SET personality = 'realistic', custom_personality = ''
+               WHERE personality = ?""",
+            (key,),
+        )
         cursor = await self._db.execute(
             "DELETE FROM personality_presets WHERE key = ?", (key,)
         )

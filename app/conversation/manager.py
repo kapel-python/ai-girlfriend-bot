@@ -221,8 +221,17 @@ class ConversationManager:
     ) -> list[dict]:
         personality_prompt = ""
         if self._personalities is not None and settings.personality != "custom":
-            preset = await self._personalities.get(settings.personality)
-            personality_prompt = preset.prompt if preset else ""
+            try:
+                preset = await self._personalities.get(settings.personality)
+                if preset is None:
+                    settings.personality = "realistic"
+                else:
+                    personality_prompt = preset.prompt
+            except Exception:
+                logger.exception(
+                    "user_id=%s event=personality_load_failed fallback=realistic", user_id
+                )
+                settings.personality = "realistic"
         system_prompt = build_system_prompt(
             settings.personality,
             custom_prompt or settings.custom_prompt,
