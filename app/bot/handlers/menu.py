@@ -67,13 +67,12 @@ async def cmd_help(message: Message, config: Config) -> None:
 @router.message(Command("reset"))
 async def cmd_reset(
     message: Message,
-    manager: ConversationManager,
-    history_repo: HistoryRepository,
 ) -> None:
-    await manager.cancel_active(message.from_user.id)
-    await history_repo.clear(message.from_user.id)
-    logger.info("user_id=%s event=dialog_cleared", message.from_user.id)
-    await message.answer("диалог очищен. начнём с чистого листа 🙂", reply_markup=kb.back_to_menu())
+    await message.answer(
+        "🧹 удалить только диалог?\n\n"
+        "будут удалены все сообщения диалога. память и настроение останутся.",
+        reply_markup=kb.clear_delete_confirm("dialog"),
+    )
 
 
 # --- главное меню ---------------------------------------------------------- #
@@ -165,12 +164,31 @@ async def cb_clear(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text(
         "🧹 что очищаем?\n\n"
         "настройки, промт и выбранная модель сохранятся в любом случае",
-        reply_markup=kb.clear_confirm(),
+        reply_markup=kb.clear_options(),
     )
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"clear:dialog", "clear:all", "clear:everything"}))
+_CLEAR_INFO = {
+    "dialog": "будут удалены все сообщения диалога. память и настроение останутся.",
+    "all": "будут удалены все сообщения диалога и долгосрочная память. настроение останется.",
+    "mood": "будет удалено только текущее настроение. диалог и память останутся.",
+    "everything": "будут удалены все сообщения диалога, долгосрочная память и текущее настроение.",
+}
+
+
+@router.callback_query(F.data.regexp(r"^clear:request:(dialog|all|mood|everything)$"))
+async def cb_clear_request(callback: CallbackQuery, state: FSMContext) -> None:
+    kind = callback.data.rsplit(":", 1)[1]
+    await state.set_state(SettingsStates.confirm_clear_dialog)
+    await callback.message.edit_text(
+        f"⚠️ подтвердить удаление?\n\n{_CLEAR_INFO[kind]}",
+        reply_markup=kb.clear_delete_confirm(kind),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^clear:confirm:(dialog|all|mood|everything)$"))
 async def cb_clear_confirm(
     callback: CallbackQuery,
     state: FSMContext,
@@ -180,17 +198,23 @@ async def cb_clear_confirm(
     settings_repo: UserSettingsRepository,
 ) -> None:
     user_id = callback.from_user.id
+    kind = callback.data.rsplit(":", 1)[1]
     await state.clear()
-    await manager.cancel_active(user_id)
-    await history_repo.clear(user_id)
-    if callback.data == "clear:dialog":
+    if kind == "mood":
+        await settings_repo.update(user_id, mood="")
+        logger.info("user_id=%s event=mood_cleared", user_id)
+        text = "настроение удалено, диалог и память остались"
+    else:
+        await manager.cancel_active(user_id)
+        await history_repo.clear(user_id)
+    if kind == "dialog":
         logger.info("user_id=%s event=dialog_cleared", user_id)
         text = "диалог очищен, память осталась"
-    elif callback.data == "clear:all":
+    elif kind == "all":
         await memory_repo.clear(user_id)
         logger.info("user_id=%s event=dialog_and_memory_cleared", user_id)
         text = "диалог и долгосрочная память очищены"
-    else:
+    elif kind == "everything":
         # полный сброс состояния: история, факты, настроение, стадия обиды
         await memory_repo.clear(user_id)
         await settings_repo.update(user_id, mood="", proactive_stage=0)

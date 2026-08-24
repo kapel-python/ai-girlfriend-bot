@@ -38,17 +38,32 @@ def back_to_menu() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def clear_confirm() -> InlineKeyboardMarkup:
+def clear_options() -> InlineKeyboardMarkup:
+    """Available cleanup scopes. Each scope leads to a separate confirmation."""
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✅ только диалог", callback_data="clear:dialog"),
-        InlineKeyboardButton(text="🧠 диалог + память", callback_data="clear:all"),
+        InlineKeyboardButton(text="💬 только диалог", callback_data="clear:request:dialog"),
+        InlineKeyboardButton(text="🧠 диалог + память", callback_data="clear:request:all"),
     )
     builder.row(InlineKeyboardButton(
-        text="🗑 очистить всё (и настроение)", callback_data="clear:everything"
+        text="💭 только настроение", callback_data="clear:request:mood"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="🗑 всё (диалог, память и настроение)", callback_data="clear:request:everything"
     ))
     builder.row(InlineKeyboardButton(text="❌ отмена", callback_data="menu:back"))
     return builder.as_markup()
+
+
+def clear_delete_confirm(kind: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"clear:confirm:{kind}"))
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data="menu:clear"))
+    return builder.as_markup()
+
+
+# Backwards-compatible alias for callers outside the handler module.
+clear_confirm = clear_options
 
 
 def personality_menu(
