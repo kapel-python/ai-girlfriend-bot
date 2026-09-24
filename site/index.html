@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aria — Telegram-бот «ИИ девушка»</title>
-<meta name="description" content="Telegram-бот на Python и aiogram 3, который переписывается как живой человек: пауза перед ответом, реалистичная скорость набора, память, настроение и проактивность.">
+<meta name="description" content="Telegram-бот, который переписывается как живой человек: помнит важное, не спешит с ответом и иногда пишет первой.">
 <meta name="theme-color" content="#0a0710">
 <meta property="og:title" content="Aria — Telegram-бот «ИИ девушка»">
-<meta property="og:description" content="Переписка, которую невозможно отличить от живой: debounce, typing-симуляция, память, настроение и проактивность.">
+<meta property="og:description" content="Живая переписка в Telegram: она помнит, скучает, меняет настроение и может написать первой.">
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -42,7 +42,7 @@
       <a href="#features">Возможности</a>
       <a href="#how">Как работает</a>
       <a href="#personas">Характеры</a>
-      <a href="#stack">Архитектура</a>
+      <a href="#stack">Как устроено</a>
       <a href="#start">Установка</a>
       <a href="#faq">FAQ</a>
     </nav>
@@ -69,7 +69,7 @@
     <div class="hero__copy">
       <div class="pill reveal" data-reveal>
         <span class="pill__dot"></span>
-        Python · aiogram 3.x · SQLite
+        Telegram · живая переписка · память
       </div>
 
       <h1 class="hero__title reveal" data-reveal data-reveal-delay="60">
@@ -78,9 +78,8 @@
       </h1>
 
       <p class="hero__lead reveal" data-reveal data-reveal-delay="120">
-        Она не отвечает мгновенно и не пишет как ассистент. Дочитывает серию сообщений,
-        печатает со скоростью человека, помнит важное, злится, скучает и пишет первой,
-        если вы пропали посреди разговора.
+        Она не отвечает мгновенно и не превращает разговор в список советов. Дочитывает сообщения,
+        печатает как человек, помнит важное, скучает и иногда пишет первой.
       </p>
 
       <div class="hero__cta reveal" data-reveal data-reveal-delay="180">
@@ -94,15 +93,15 @@
       <dl class="hero__stats reveal" data-reveal data-reveal-delay="240">
         <div class="stat">
           <dt class="stat__value"><span class="count" data-count="2" data-decimals="1">0</span> с</dt>
-          <dd class="stat__label">debounce перед ответом</dd>
+          <dd class="stat__label">пауза перед ответом</dd>
         </div>
         <div class="stat">
           <dt class="stat__value"><span class="count" data-count="100">0</span></dt>
-          <dd class="stat__label">сообщений в контексте</dd>
+          <dd class="stat__label">сообщений в памяти</dd>
         </div>
         <div class="stat">
           <dt class="stat__value"><span class="count" data-count="7">0</span></dt>
-          <dd class="stat__label">пресетов характера</dd>
+          <dd class="stat__label">характеров на выбор</dd>
         </div>
       </dl>
     </div>
@@ -135,22 +134,22 @@
       </div>
 
       <div class="floaty floaty--1" aria-hidden="true">
-        <b>mood</b><span>тёплое, игривое</span>
+        <b>настроение</b><span>тёплое, игривое</span>
       </div>
       <div class="floaty floaty--2" aria-hidden="true">
-        <b>typing</b><span>4.2 с · 38 симв.</span>
+        <b>печатает</b><span>4.2 с · живой ответ</span>
       </div>
     </div>
   </div>
 
   <div class="marquee" aria-hidden="true">
     <div class="marquee__track">
-      <span>debounce</span><i>✦</i><span>typing-симуляция</span><i>✦</i><span>долгосрочная память</span><i>✦</i>
-      <span>настроение</span><i>✦</i><span>проактивность</span><i>✦</i><span>generation_id</span><i>✦</i>
-      <span>время суток</span><i>✦</i><span>JSON-решение об ответе</span><i>✦</i>
-      <span>debounce</span><i>✦</i><span>typing-симуляция</span><i>✦</i><span>долгосрочная память</span><i>✦</i>
-      <span>настроение</span><i>✦</i><span>проактивность</span><i>✦</i><span>generation_id</span><i>✦</i>
-      <span>время суток</span><i>✦</i><span>JSON-решение об ответе</span><i>✦</i>
+      <span>пауза перед ответом</span><i>✦</i><span>естественный набор текста</span><i>✦</i><span>память</span><i>✦</i>
+      <span>настроение</span><i>✦</i><span>пишет сама</span><i>✦</i><span>не отвечает на старый текст</span><i>✦</i>
+      <span>время суток</span><i>✦</i><span>понимает, когда ответить</span><i>✦</i>
+      <span>пауза перед ответом</span><i>✦</i><span>естественный набор текста</span><i>✦</i><span>память</span><i>✦</i>
+      <span>настроение</span><i>✦</i><span>пишет сама</span><i>✦</i><span>не отвечает на старый текст</span><i>✦</i>
+      <span>время суток</span><i>✦</i><span>понимает, когда ответить</span><i>✦</i>
     </div>
   </div>
 </section>
@@ -171,47 +170,45 @@
         <div class="card__icon">⏳</div>
         <h3>Дочитывает, прежде чем отвечать</h3>
         <p>
-          Быстрые сообщения группируются в один буфер: пока вы дописываете мысль в три
-          коротких реплики, она не бросается отвечать на первую. Пауза настраивается.
+          Быстрые сообщения она собирает вместе и ждёт, пока вы допишете мысль.
+          Поэтому не отвечает на первую фразу и не теряет следующую.
         </p>
         <div class="chips">
-          <span class="chip">debounce 2.0 с</span>
-          <span class="chip">буфер сообщений</span>
-          <span class="chip">generation_id</span>
+          <span class="chip">пауза 2 секунды</span>
+          <span class="chip">сообщения ждут ответа</span>
+          <span class="chip">старое не отправляется</span>
         </div>
       </article>
 
       <article class="card reveal" data-reveal data-reveal-delay="60">
         <div class="card__icon">⌨️</div>
         <h3>Печатает как человек</h3>
-        <p>Время набора считается из длины и сложности текста, «печатает…» держится живым keep-alive.</p>
+        <p>Она печатает с разной скоростью и держит индикатор, пока пишет.</p>
       </article>
 
       <article class="card reveal" data-reveal data-reveal-delay="120">
         <div class="card__icon">🧠</div>
         <h3>Помнит важное</h3>
-        <p>Последние 100 сообщений в контексте плюс долгосрочные факты, которые извлекает отдельный вызов модели.</p>
+        <p>Она помнит последние сообщения и важные факты о вас, поэтому не начинает каждый раз с нуля.</p>
       </article>
 
       <article class="card reveal" data-reveal data-reveal-delay="60">
         <div class="card__icon">🌙</div>
         <h3>Живёт по московскому времени</h3>
-        <p>Ночью сонная, утром бодрее, выходные не похожи на будни — время и день недели уходят в контекст.</p>
+        <p>Ночью она спокойнее, утром бодрее, а в выходные может говорить иначе, чем в будни.</p>
       </article>
 
       <article class="card card--accent reveal" data-reveal data-reveal-delay="120">
         <div class="card__icon">💔</div>
         <h3>Обижается по-настоящему</h3>
         <p>
-          После паузы код отдельно выбирает широкое окно ожидания, модель решает,
-          уместно ли писать, и только потом код выбирает время отправки. Один
-          цикл — не больше одного сообщения; старые фиксированные стадии и
-          отдельное «доброе утро» deprecated.
+          Если вы долго не отвечаете, она сама решает, стоит ли написать.
+          Обычно это короткое сообщение, а не длинная лекция.
         </p>
         <div class="escalation" aria-hidden="true">
-          <span class="escalation__step"><b>1</b>DECISION</span>
+          <span class="escalation__step"><b>1</b>решение</span>
           <span class="escalation__line"></span>
-          <span class="escalation__step"><b>2</b>TIMING</span>
+          <span class="escalation__step"><b>2</b>время</span>
           <span class="escalation__line"></span>
           <span class="escalation__step escalation__step--cold"><b>3</b>1 сообщение</span>
         </div>
@@ -220,26 +217,23 @@
       <article class="card reveal" data-reveal data-reveal-delay="60">
         <div class="card__icon">🎭</div>
         <h3>Настроение живёт в базе</h3>
-        <p>Модель возвращает своё состояние в каждом ответе — оно сохраняется и влияет на следующие.</p>
+        <p>Настроение сохраняется и влияет на следующие ответы — иногда это видно по тону.</p>
       </article>
 
       <article class="card reveal" data-reveal data-reveal-delay="120">
         <div class="card__icon">🎚️</div>
         <h3>Всё через меню</h3>
-        <p>Характер, глобальные модель и параметры, четыре варианта очистки — inline-кнопками, без правки конфигов.</p>
+        <p>Характер, настроение и очистка — в понятном меню. Настройки не нужно искать в файлах.</p>
       </article>
 
       <article class="card card--wide reveal" data-reveal data-reveal-delay="60">
         <div class="card__icon">🧩</div>
-        <h3>Решает модель, а не <code>random()</code></h3>
+        <h3>Иногда молчит, иногда отвечает</h3>
         <p>
-          Ответ приходит строгим JSON: <code>should_reply</code>, массив сообщений и
-          <code>mood</code>. Если модель не умеет <code>json_object</code> — клиент
-          откатывается на обычный режим и аккуратно нарезает длинный текст.
+          Она не отвечает на каждое сообщение одинаково. Иногда поддержит разговор,
+          иногда ответит коротко, а иногда просто промолчит.
         </p>
-        <pre class="mini-code"><code>{"should_reply": true,
- "messages": ["ахахах ну ты даёшь", "расскажи подробнее"],
- "mood": "весёлое, заинтересованное"}</code></pre>
+        <p class="mini-quote">«иногда тишина тоже часть разговора»</p>
       </article>
     </div>
   </div>
@@ -257,33 +251,33 @@
     <ol class="pipeline">
       <li class="step reveal" data-reveal>
         <span class="step__num">01</span>
-        <h3>Приём и буфер</h3>
-        <p>Тонкий handler отдаёт сообщение в <code>ConversationManager</code>, тот копит его в буфере и увеличивает <code>generation_id</code>.</p>
+        <h3>Сначала сообщение</h3>
+        <p>Бот ждёт, пока вы допишете мысль, и собирает несколько сообщений в одно.</p>
       </li>
       <li class="step reveal" data-reveal data-reveal-delay="60">
         <span class="step__num">02</span>
-        <h3>Debounce</h3>
-        <p>Ждём паузу в 2 секунды. Пришло новое сообщение — прошлая задача отменяется, устаревший ответ не уйдёт никогда.</p>
+        <h3>Небольшая пауза</h3>
+        <p>Она ждёт пару секунд. Если вы отправляете сообщения одно за другим, ответ не будет спешить.</p>
       </li>
       <li class="step reveal" data-reveal data-reveal-delay="120">
         <span class="step__num">03</span>
-        <h3>Контекст и генерация</h3>
-        <p>Система + характер + настроение + память + московское время уходят в OpenAI-совместимый API. Сразу включается «печатает…».</p>
+        <h3>Она вспоминает</h3>
+        <p>Бот учитывает ваш разговор, характер, настроение, память и время.</p>
       </li>
       <li class="step reveal" data-reveal data-reveal-delay="180">
         <span class="step__num">04</span>
-        <h3>Решение об ответе</h3>
-        <p>Парсер устойчиво разбирает JSON. <code>should_reply: false</code> — она молчит, и это осознанное молчание, а не сбой.</p>
+        <h3>Иногда отвечает, иногда нет</h3>
+        <p>Иногда она поддержит разговор, иногда ответит коротко, а иногда промолчит.</p>
       </li>
       <li class="step reveal" data-reveal data-reveal-delay="240">
         <span class="step__num">05</span>
-        <h3>Симуляция набора</h3>
-        <p>Считаем реальное время печати каждой реплики, держим индикатор и отправляем сообщения по одному.</p>
+        <h3>Печатает как человек</h3>
+        <p>Она держит индикатор, пока пишет, и отправляет сообщения по одному.</p>
       </li>
       <li class="step reveal" data-reveal data-reveal-delay="300">
         <span class="step__num">06</span>
-        <h3>Память</h3>
-        <p>История и настроение — в SQLite. Раз в три обмена отдельный вызов вытаскивает факты в долгосрочную память.</p>
+        <h3>Помнит важное</h3>
+        <p>Она запоминает детали, которые действительно могут пригодиться в следующих разговорах.</p>
       </li>
     </ol>
   </div>
@@ -294,12 +288,12 @@
   <div class="container">
     <header class="section__head reveal" data-reveal>
       <span class="eyebrow">Характеры</span>
-      <h2 class="section__title">Семь пресетов — и свой поверх</h2>
-      <p class="section__sub">Выберите характер и посмотрите, как меняется тон одного и того же диалога.</p>
+      <h2 class="section__title">Выбери, с кем хочешь общаться</h2>
+      <p class="section__sub">Попробуй разные характеры и посмотри, как меняется сам разговор.</p>
     </header>
 
     <div class="personas reveal" data-reveal>
-      <div class="personas__tabs" role="tablist" aria-label="Пресеты характера" id="personaTabs"></div>
+      <div class="personas__tabs" role="tablist" aria-label="Варианты характера" id="personaTabs"></div>
 
       <div class="personas__stage">
         <div class="personas__info">
@@ -322,17 +316,16 @@
 <section class="section section--alt" id="stack">
   <div class="container stack__grid">
     <div class="stack__copy reveal" data-reveal>
-      <span class="eyebrow">Архитектура</span>
-      <h2 class="section__title">Скучный код там, где важна надёжность</h2>
+      <span class="eyebrow">Как устроено</span>
+      <h2 class="section__title">Всё устроено просто</h2>
       <p class="section__sub">
-        Тонкие хендлеры, вся логика в сервисах, весь SQL — в репозитории.
-        Переезд на PostgreSQL не трогает ни один хендлер.
+        Бот быстро реагирует, не путает сообщения и аккуратно хранит историю.
       </p>
       <ul class="ticks">
-        <li>Асинхронный клиент с retry на 429, 5xx и таймауты</li>
-        <li>Список моделей подтягивается из API и кэшируется на час</li>
-        <li>Логи без ключей и без содержимого переписки</li>
-        <li>Docker и docker-compose из коробки</li>
+        <li>Перебои с сетью не ломают диалог</li>
+        <li>Список моделей обновляется автоматически</li>
+        <li>В логах нет ключей и текста разговоров</li>
+        <li>Можно запустить через Docker</li>
       </ul>
     </div>
 
@@ -352,8 +345,8 @@
   <div class="container">
     <header class="section__head reveal" data-reveal>
       <span class="eyebrow">Установка</span>
-      <h2 class="section__title">Три команды до первого «привет»</h2>
-      <p class="section__sub">Нужен только токен от @BotFather и ключ доступа к модели.</p>
+      <h2 class="section__title">Три команды — и можно начинать общение</h2>
+      <p class="section__sub">Нужен токен от @BotFather и ключ доступа к модели.</p>
     </header>
 
     <div class="terminal reveal" data-reveal>
@@ -375,8 +368,8 @@ python run.py">
 
 <span class="c-com"># 3 — поехали</span>
 <span class="c-p">$</span> python run.py
-<span class="c-ok">✓</span> база инициализирована · <span class="c-s">bot.db</span>
-<span class="c-ok">✓</span> polling запущен — напишите боту <span class="c-s">/start</span></code></pre>
+<span class="c-ok">✓</span> база готова
+<span class="c-ok">✓</span> бот запущен — напишите <span class="c-s">/start</span></code></pre>
     </div>
 
     <div class="cmds">
@@ -387,8 +380,7 @@ python run.py">
     </div>
     <p class="section__sub" style="margin-top: 22px">
       Docker использует <code>./data</code> и <code>/app/data/bot.db</code>.
-      Этот лендинг статический: опубликуйте каталог <code>site/</code> или откройте
-      <code>site/index.html</code>. Deep-link:
+      Этот лендинг статический: его можно открыть как <code>site/index.html</code>. Ссылка на бота:
       <a href="https://t.me/SuperAI_girls_ai_bot?start"><code>t.me/SuperAI_girls_ai_bot?start</code></a>.
     </p>
   </div>
@@ -405,32 +397,32 @@ python run.py">
     <div class="faq" id="faqList">
       <details class="faq__item reveal" data-reveal>
         <summary>Какие модели поддерживаются?<span class="faq__mark" aria-hidden="true"></span></summary>
-        <div class="faq__body"><p>Любой OpenAI-совместимый эндпоинт. Список моделей бот забирает через <code>GET /v1/models</code>, кэширует на час и даёт выбрать прямо в меню. Выбор модели, глобальный промт, typing и debounce — общие для всех и меняются администратором; personality, mood, история и факты остаются per-user.</p></div>
+        <div class="faq__body"><p>Бот получает список доступных моделей и показывает его в меню. Выбор модели и общие настройки меняет администратор, а характер, история и настроение остаются у каждого пользователя свои.</p></div>
       </details>
 
       <details class="faq__item reveal" data-reveal data-reveal-delay="60">
         <summary>Она правда может не ответить?<span class="faq__mark" aria-hidden="true"></span></summary>
-        <div class="faq__body"><p>Да, но это крайняя мера. Решение принимает модель полем <code>should_reply</code>. В нормальном диалоге она почти всегда отвечает — молчание приберегается для ситуаций, где даже сухое «ок» уже не выражает состояние.</p></div>
+        <div class="faq__body"><p>Да, иногда она может промолчать. Это редкий случай: обычно бот отвечает, но иногда короткое «ок» или пауза лучше подходят разговору.</p></div>
       </details>
 
       <details class="faq__item reveal" data-reveal data-reveal-delay="120">
         <summary>Что будет, если писать быстрее, чем она отвечает?<span class="faq__mark" aria-hidden="true"></span></summary>
-        <div class="faq__body"><p>Каждое новое сообщение увеличивает <code>generation_id</code> и отменяет предыдущую задачу, а необработанные сообщения возвращаются в буфер. Устаревший ответ не уйдёт. Если отправка уже началась — отправленное сохранится в историю, чтобы новая генерация видела контекст.</p></div>
+        <div class="faq__body"><p>Она подождёт, пока вы закончите мысль, и ответит на всю серию сообщений. Старый ответ не отправится, если вы уже написали что-то новое.</p></div>
       </details>
 
       <details class="faq__item reveal" data-reveal data-reveal-delay="180">
         <summary>Где хранятся данные?<span class="faq__mark" aria-hidden="true"></span></summary>
-        <div class="faq__body"><p>Локально, в SQLite через <code>aiosqlite</code>. Весь SQL изолирован в репозитории, так что переезд на PostgreSQL не затрагивает логику. Логи пишутся без ключей и без содержимого переписки.</p></div>
+        <div class="faq__body"><p>История и память хранятся в базе на сервере. В обычных журналах не сохраняются ключи и содержимое переписки.</p></div>
       </details>
 
       <details class="faq__item reveal" data-reveal data-reveal-delay="240">
         <summary>Можно переписать характер под себя?<span class="faq__mark" aria-hidden="true"></span></summary>
-        <div class="faq__body"><p>Да. Промты разделены на слои: системный (пользователь его не ломает), пресет характера, настроение и ваш собственный текст. Правится через меню, применяется поверх пресета.</p></div>
+        <div class="faq__body"><p>Да. В меню можно выбрать готовый характер или описать свой: имя, биографию, привычки и манеру речи. Основные правила бота при этом останутся прежними.</p></div>
       </details>
 
       <details class="faq__item reveal" data-reveal data-reveal-delay="300">
         <summary>Как всё стереть?<span class="faq__mark" aria-hidden="true"></span></summary>
-        <div class="faq__body"><p>В меню четыре варианта: только диалог, диалог вместе с долгосрочной памятью, только настроение и полный сброс. Полный сброс также обнуляет служебный счётчик proactive_stage; настройки, промт и глобальная модель сохраняются.</p></div>
+        <div class="faq__body"><p>В меню есть четыре варианта: удалить только диалог, диалог вместе с памятью, только настроение или всё сразу. Выбранные настройки при этом сохраняются.</p></div>
       </details>
     </div>
   </div>
@@ -462,7 +454,7 @@ python run.py">
       <span class="brand__mark" aria-hidden="true"><span class="brand__pulse"></span></span>
       <div>
         <b>Aria</b>
-        <span>Telegram-бот «ИИ девушка» · Python · aiogram 3.x</span>
+        <span>Telegram-бот для живой переписки</span>
       </div>
     </div>
     <nav class="footer__links" aria-label="Футер">
