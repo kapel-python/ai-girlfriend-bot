@@ -135,8 +135,7 @@ app/
 - `/help` — справка
 
 Других команд бота нет: personality, память, модель и параметры открываются
-inline-кнопками. Для deep-link placeholder используйте реальный username бота:
-`https://t.me/<BOT_USERNAME>?start` (в примере это намеренный placeholder).
+inline-кнопками. Deep-link для запуска: `https://t.me/SuperAI_girls_ai_bot?start`.
 
 ## Docker
 
