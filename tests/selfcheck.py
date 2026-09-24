@@ -14,10 +14,16 @@ import os
 import sys
 import tempfile
 import time
+from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.ai.response_parser import parse_response, parse_facts, split_fallback_text
+from app.ai.response_parser import (
+    parse_facts,
+    parse_initiative,
+    parse_response,
+    split_fallback_text,
+)
 from app.conversation.typing_simulator import calculate_typing_duration
 from app.conversation.sender import split_long_text
 from app.conversation.manager import ConversationManager
@@ -38,6 +44,22 @@ def check(name: str, condition: bool) -> None:
     print(f"{PASS if condition else FAIL} {name}")
     if not condition:
         failures.append(name)
+
+
+async def wait_until(condition, timeout: float = 2.0) -> bool:
+    """Ждёт синхронный или асинхронный результат без хрупких sleep."""
+    async def evaluate():
+        result = condition()
+        if asyncio.iscoroutine(result):
+            return await result
+        return bool(result)
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if await evaluate():
+            return True
+        await asyncio.sleep(0.02)
+    return await evaluate()
 
 
 # ---------- 1. Парсер ответов ---------- #
@@ -65,6 +87,10 @@ check("parser: 5 сообщений подряд допустимы", len(p.mess
 
 f = parse_facts('{"facts": ["любит кошек", "работает программистом"]}')
 check("parser: факты", f == ["любит кошек", "работает программистом"])
+
+check("parser: proactive DECISION YES", parse_initiative('{"initiative": "YES"}') == "YES")
+check("parser: proactive DECISION MAYBE", parse_initiative('{"initiative": "maybe"}') == "MAYBE")
+check("parser: malformed DECISION=no", parse_initiative("garbage") == "NO")
 
 p = parse_response('{"should_reply": true, "messages": ["привет"], "mood": "игривое"}')
 check("parser: mood извлекается", p.mood == "игривое")
@@ -185,17 +211,19 @@ async def manager_tests() -> None:
     await manager.handle_message(1, 100, "как дела?")
     await asyncio.sleep(0.1)
     await manager.handle_message(1, 100, "что делаешь?")
-    await asyncio.sleep(1.0)
+    await wait_until(lambda: len(ai.calls) == 1 and sender.sent == ["привет!"])
 
     check("manager: 3 быстрых сообщения = 1 вызов AI", len(ai.calls) == 1)
-    merged = ai.calls[0][-1]["content"] if ai.calls else ""
-    check("manager: сообщения объединены в одну реплику",
-          "привет" in merged and "как дела?" in merged and "что делаешь?" in merged)
+    incoming = "\n".join(
+        m["content"] for m in (ai.calls[0] if ai.calls else []) if m["role"] == "user"
+    )
+    check("manager: сообщения переданы одной генерации",
+          "привет" in incoming and "как дела?" in incoming and "что делаешь?" in incoming)
     check("manager: ответ отправлен", sender.sent == ["привет!"])
 
     history = await history_repo.get_recent(1, 10)
-    check("manager: история сохранена (user + assistant)",
-          [m.role for m in history] == ["user", "assistant"])
+    check("manager: история сохраняет каждое сообщение и ответ",
+          [m.role for m in history] == ["user", "user", "user", "assistant"])
 
     # --- 4.2 сообщение во время генерации отменяет устаревший ответ --- #
     ai2 = FakeAI(
@@ -210,13 +238,15 @@ async def manager_tests() -> None:
     await manager2.handle_message(2, 200, "первое")
     await asyncio.sleep(0.6)          # debounce прошёл, генерация идёт (0.5 сек)
     await manager2.handle_message(2, 200, "а ты где?")   # отменяет генерацию
-    await asyncio.sleep(1.5)
+    await wait_until(lambda: "актуальный" in sender2.sent, timeout=3.0)
 
     check("manager: устаревший ответ НЕ отправлен", "УСТАРЕВШИЙ" not in sender2.sent)
     check("manager: актуальный ответ отправлен", "актуальный" in sender2.sent)
-    last_ctx = ai2.calls[-1][-1]["content"] if ai2.calls else ""
+    last_user_ctx = "\n".join(
+        m["content"] for m in (ai2.calls[-1] if ai2.calls else []) if m["role"] == "user"
+    )
     check("manager: новая генерация видит оба сообщения",
-          "первое" in last_ctx and "а ты где?" in last_ctx)
+          "первое" in last_user_ctx and "а ты где?" in last_user_ctx)
 
     # --- 4.3 модель решила не отвечать --- #
     ai3 = FakeAI(['{"should_reply": false, "messages": []}'])
@@ -232,18 +262,44 @@ async def manager_tests() -> None:
           len(h3) == 1 and h3[0].role == "user")
 
     # --- 4.4 ошибка AI не роняет pipeline --- #
-    class BrokenAI(FakeAI):
+    class FlakyAI(FakeAI):
+        def __init__(self):
+            super().__init__([
+                '{"should_reply": true, "messages": ["после ошибки"]}'
+            ])
+            self.fail_next = True
+            self.attempted = False
+
         async def chat(self, model, messages, max_tokens=800, temperature=0.9, json_mode=False):
             from app.ai.client import AIClientError
-            raise AIClientError("boom")
+            if self.fail_next:
+                self.fail_next = False
+                self.attempted = True
+                raise AIClientError("boom")
+            return await super().chat(model, messages, max_tokens, temperature, json_mode)
 
-    ai4 = BrokenAI([])
-    manager4 = ConversationManager(cfg, ai4, FakeSender(),
+    ai4 = FlakyAI()
+    sender4 = FakeSender()
+    manager4 = ConversationManager(cfg, ai4, sender4,
                                    MemoryService(ai4, history_repo, memory_repo, 20),
                                    settings_repo, history_repo)
     await manager4.handle_message(4, 400, "привет")
-    await asyncio.sleep(1.0)
+    await wait_until(
+        lambda: ai4.attempted and manager4._sessions[4].task.done()
+    )
+    buffered4 = manager4._sessions[4].buffer
     check("manager: ошибка API обработана, менеджер жив", True)
+    check("manager: сообщение не теряется после ошибки API",
+          len(buffered4) == 1 and buffered4[0].text == "привет")
+
+    await manager4.handle_message(4, 400, "повтор")
+    await wait_until(lambda: "после ошибки" in sender4.sent, timeout=2.0)
+    retry_context = "\n".join(
+        m["content"] for m in (ai4.calls[-1] if ai4.calls else []) if m["role"] == "user"
+    )
+    check("manager: повторная генерация получает обе реплики",
+          "после ошибки" in sender4.sent
+          and "привет" in retry_context and "повтор" in retry_context)
 
     # --- 4.4.1 характер: дефолт «реалистичный», свой характер --- #
     from app.ai.prompts import PERSONALITY_PRESETS, build_system_prompt
@@ -276,44 +332,54 @@ async def manager_tests() -> None:
     s6 = await settings_repo.get(6)
     check("mood: сохраняется в настройках", s6.mood == "игривое")
 
-    # --- 4.7 проактивность: стадии эскалации (ты куда пропал → последняя попытка → обида) --- #
-    ai7 = FakeAI(['{"should_reply": true, "messages": ["ок"]}',                        # обычный ответ
-                  '{"should_reply": true, "messages": ["ты куда пропал?"]}',          # стадия 1
-                  '{"should_reply": true, "messages": ["ну ладно, молчи дальше"]}'])  # стадия 2
+    # --- 4.7 проактивность: DECISION → TIMING → одно сообщение за цикл --- #
+    ai7 = FakeAI([
+        '{"should_reply": true, "messages": ["ок"]}',                         # обычный ответ
+        '{"initiative": "YES"}',                                                # решение 1
+        '{"should_reply": true, "messages": ["ты куда пропал?"]}',            # сообщение 1
+        '{"initiative": "YES"}',                                                # решение 2
+        '{"should_reply": true, "messages": ["ну ладно, молчи дальше"]}',      # сообщение 2
+    ])
     sender7 = FakeSender()
-    manager7 = ConversationManager(cfg, ai7, sender7,
+    cfg7 = replace(cfg, proactive_max_messages=2, proactive_cooldown_minutes=0.0)
+    manager7 = ConversationManager(cfg7, ai7, sender7,
                                    MemoryService(ai7, history_repo, memory_repo, 20),
                                    settings_repo, history_repo)
+    manager7._sample_proactive_delay = lambda: 0.01
+    manager7._initiative_probability = lambda initiative, settings: 1.0 if initiative == "YES" else 0.0
+
     await manager7.handle_message(7, 700, "привет")
-    await asyncio.sleep(1.0)
+    await wait_until(lambda: sender7.sent == ["ок"])
     check("proactive: обычный ответ отправлен", sender7.sent == ["ок"])
 
     manager7.start_proactive_loop()
-    await asyncio.sleep(1.5)
-    check("proactive: стадия 1 — «ты куда пропал?»", "ты куда пропал?" in sender7.sent)
+    await wait_until(lambda: "ты куда пропал?" in sender7.sent, timeout=3.0)
+    check("proactive: первое сообщение после YES", "ты куда пропал?" in sender7.sent)
 
-    await asyncio.sleep(1.5)
-    check("proactive: стадия 2 — последняя попытка", "ну ладно, молчи дальше" in sender7.sent)
+    await wait_until(lambda: "ну ладно, молчи дальше" in sender7.sent, timeout=3.0)
+    check("proactive: второе сообщение в отдельном цикле",
+          "ну ладно, молчи дальше" in sender7.sent)
 
-    await asyncio.sleep(1.5)
+    async def proactive_count_saved():
+        return (await settings_repo.get(7)).proactive_stage == 2
+
+    await wait_until(proactive_count_saved)
     s7 = await settings_repo.get(7)
-    check("proactive: после двух игноров настроение «недовольная»",
-          "недовольная" in s7.mood)
-    check("proactive: стадия 3 сохранена в БД", s7.proactive_stage == 3)
+    check("proactive: счётчик сообщений сохранён в БД", s7.proactive_stage == 2)
     count7 = len(sender7.sent)
-    await asyncio.sleep(1.0)
-    check("proactive: стадия 3 — больше не пишет", len(sender7.sent) == count7)
+    await asyncio.sleep(0.3)
+    check("proactive: лимит сообщений без новой активности", len(sender7.sent) == count7)
 
-    # пользователь вернулся — стадия сбрасывается, настроение остаётся
+    # пользователь вернулся — счётчик сбрасывается, настроение задаётся моделью
     ai7.replies.append('{"should_reply": true, "messages": ["и что молчал?"], "mood": "недовольная"}')
     await manager7.handle_message(7, 700, "прости, был занят")
-    # стадия сбрасывается синхронно в handle_message — проверяем сразу,
-    # пока тестовый цикл с микро-окнами не успел эскалировать заново
     s7b = await settings_repo.get(7)
-    check("proactive: возвращение сбрасывает стадию", s7b.proactive_stage == 0)
-    await asyncio.sleep(1.0)
-    check("proactive: ответ уже в обиженном тоне (mood в контексте)",
-          "и что молчал?" in sender7.sent)
+    session7 = manager7._sessions[7]
+    check("proactive: возвращение сбрасывает счётчик",
+          s7b.proactive_stage == 0 and session7.proactive_count_since_user == 0)
+    await wait_until(lambda: "и что молчал?" in sender7.sent)
+    check("proactive: настроение из ответа сохранено",
+          (await settings_repo.get(7)).mood == "недовольная")
 
     # --- 4.7.1 уведомление о лимите памяти (один раз при пересечении) --- #
     cfg_mem = Config(
@@ -351,52 +417,36 @@ async def manager_tests() -> None:
     check("memory: повторного уведомления нет",
           len([m for m in sender9.sent if "забывать" in m]) == 1)
 
-    # --- 4.8 проактивность: модель может решить молчать (попытка не засчитывается) --- #
+    # --- 4.8 проактивность: DECISION=NO не приводит к отправке --- #
     ai8 = FakeAI(['{"should_reply": true, "messages": ["ок"]}',
-                  '{"should_reply": false, "messages": [], "mood": "уставшее"}'])
+                  '{"initiative": "NO"}'])
     sender8 = FakeSender()
-    manager8 = ConversationManager(cfg, ai8, sender8,
+    cfg8 = replace(cfg, proactive_cooldown_minutes=0.0)
+    manager8 = ConversationManager(cfg8, ai8, sender8,
                                    MemoryService(ai8, history_repo, memory_repo, 20),
                                    settings_repo, history_repo)
-    await manager8.handle_message(8, 800, "привет")
-    await asyncio.sleep(1.0)
-    manager8.start_proactive_loop()
-    await asyncio.sleep(1.5)
-    s8 = await settings_repo.get(8)
-    check("proactive: should_reply=false → не пишет первой", sender8.sent == ["ок"])
-    check("proactive: пропущенная попытка не эскалирует стадию", s8.proactive_stage == 0)
+    manager8._sample_proactive_delay = lambda: 0.01
 
-    # --- 4.9 «доброе утро» после вечернего прощания --- #
-    cfg_morning = Config(
-        bot_token="x", ai_api_key="x", ai_base_url="https://x",
-        default_model="test-model", message_debounce=0.3,
-        typing_simulation=True, short_memory_limit=20,
-        database_path=":memory:",
-        proactive_enabled=True,
-        proactive_stage1_min_minutes=999, proactive_stage1_max_minutes=999,
-        proactive_stage2_min_minutes=999, proactive_stage2_max_minutes=999,
-        proactive_offense_min_minutes=999, proactive_offense_max_minutes=999,
-        proactive_check_interval=0.2,
-        morning_start_hour=0, morning_end_hour=23, morning_min_idle_minutes=0.001,
-        admin_ids=frozenset(),
-    )
-    ai10 = FakeAI(['{"should_reply": true, "messages": ["споки)"], "mood": "сонное"}',
-                   '{"should_reply": true, "messages": ["доброе утро) как спалось?"]}'])
+    await manager8.handle_message(8, 800, "привет")
+    await wait_until(lambda: sender8.sent == ["ок"])
+    manager8.start_proactive_loop()
+    await wait_until(lambda: len(ai8.calls) >= 2, timeout=3.0)
+    await asyncio.sleep(0.1)
+    s8 = await settings_repo.get(8)
+    check("proactive: DECISION=NO → не пишет первой", sender8.sent == ["ок"])
+    check("proactive: NO не увеличивает счётчик",
+          s8.proactive_stage == 0 and manager8._sessions[8].proactive_count_since_user == 0)
+
+    # --- 4.9 готовим сессию для проверки восстановления после рестарта --- #
+    cfg_restore = replace(cfg, proactive_enabled=True)
+    ai10 = FakeAI(['{"should_reply": true, "messages": ["споки)"], "mood": "сонное"}'])
     sender10 = FakeSender()
-    manager10 = ConversationManager(cfg_morning, ai10, sender10,
+    manager10 = ConversationManager(cfg_restore, ai10, sender10,
                                     MemoryService(ai10, history_repo, memory_repo, 20),
                                     settings_repo, history_repo)
     await manager10.handle_message(10, 1000, "всё, я спать")
-    await asyncio.sleep(1.0)
-    check("morning: вечерний ответ отправлен", sender10.sent == ["споки)"])
-
-    manager10.start_proactive_loop()
-    await asyncio.sleep(1.5)
-    check("morning: утром написала первой",
-          "доброе утро) как спалось?" in sender10.sent)
-    count10 = len(sender10.sent)
-    await asyncio.sleep(1.0)
-    check("morning: одна попытка за утро, не спамит", len(sender10.sent) == count10)
+    await wait_until(lambda: sender10.sent == ["споки)"])
+    check("restore: диалог для восстановления обработан", sender10.sent == ["споки)"])
 
     # --- 4.9.1 глобальные настройки (одни на всех) --- #
     from app.database.repository import GlobalSettingsRepository
@@ -428,7 +478,7 @@ async def manager_tests() -> None:
     check("restore: last_chat_id и last_activity_ts сохранены в БД",
           s11.last_chat_id == 1000 and s11.last_activity_ts > 0)
 
-    manager11 = ConversationManager(cfg_morning, ai10, sender10,
+    manager11 = ConversationManager(cfg_restore, ai10, sender10,
                                     MemoryService(ai10, history_repo, memory_repo, 20),
                                     settings_repo, history_repo)
     await manager11.restore_sessions()
@@ -438,13 +488,11 @@ async def manager_tests() -> None:
     idle_restored = (time.monotonic() - restored.last_activity) / 60 if restored else 0
     check("restore: молчание до перезапуска учтено", idle_restored > 0.0005)
 
-    await manager11.shutdown()
-    await manager10.shutdown()
-
-    await manager.shutdown()
-    await manager2.shutdown()
-    await manager3.shutdown()
-    await manager4.shutdown()
+    for active_manager in (
+        manager11, manager10, manager12, manager9, manager8,
+        manager7, manager6, manager4, manager3, manager2, manager,
+    ):
+        await active_manager.shutdown()
     await db.close()
     os.unlink(tmp)
 

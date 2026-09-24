@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 
 import aiosqlite
 
-from app.database.models import HistoryMessage, MemoryFact, PersonalityPreset, UserSettings
+from app.database.models import (
+    HistoryMessage,
+    MemoryFact,
+    PendingMessageRecord,
+    PersonalityPreset,
+    UserSettings,
+)
 
 
 def _now() -> str:
@@ -227,17 +234,159 @@ class GlobalSettingsRepository:
         await self._db.commit()
 
 
+class PendingMessageRepository:
+    """Durable FIFO входящих сообщений.
+
+    Записи удаляются только после того, как соответствующий пользовательский
+    turn сохранён в history (в том числе при ``should_reply=false``). Поэтому
+    падение процесса во время AI/send не теряет реплику.
+    """
+
+    def __init__(self, db: aiosqlite.Connection):
+        self._db = db
+
+    @staticmethod
+    def _model(row) -> PendingMessageRecord:
+        return PendingMessageRecord(
+            id=int(row["id"]),
+            user_id=int(row["user_id"]),
+            chat_id=int(row["chat_id"]),
+            content=str(row["content"]),
+            created_at=_parse_datetime(row["created_at"]),
+        )
+
+    async def enqueue(
+        self, user_id: int, chat_id: int, content: str,
+        created_at: datetime | None = None,
+    ) -> PendingMessageRecord:
+        timestamp = created_at or datetime.now(timezone.utc)
+        cursor = await self._db.execute(
+            """INSERT INTO pending_messages
+               (user_id, chat_id, content, created_at) VALUES (?, ?, ?, ?)""",
+            (user_id, chat_id, content, timestamp.isoformat(timespec="microseconds")),
+        )
+        await self._db.commit()
+        row_id = int(cursor.lastrowid)
+        return PendingMessageRecord(
+            id=row_id, user_id=user_id, chat_id=chat_id,
+            content=content, created_at=timestamp,
+        )
+
+    async def list_pending(self, user_id: int) -> list[PendingMessageRecord]:
+        cursor = await self._db.execute(
+            """SELECT id, user_id, chat_id, content, created_at
+               FROM pending_messages WHERE user_id = ?
+               ORDER BY created_at, id""",
+            (user_id,),
+        )
+        return [self._model(row) for row in await cursor.fetchall()]
+
+    async def list_all_pending(self) -> list[PendingMessageRecord]:
+        cursor = await self._db.execute(
+            """SELECT id, user_id, chat_id, content, created_at
+               FROM pending_messages ORDER BY user_id, created_at, id"""
+        )
+        return [self._model(row) for row in await cursor.fetchall()]
+
+    async def delete_pending(self, message_ids: list[int] | tuple[int, ...]) -> None:
+        ids = [int(message_id) for message_id in message_ids if message_id is not None]
+        if not ids:
+            return
+        placeholders = ",".join("?" for _ in ids)
+        await self._db.execute(
+            f"DELETE FROM pending_messages WHERE id IN ({placeholders})", ids
+        )
+        await self._db.commit()
+
+    async def clear(self, user_id: int) -> None:
+        await self._db.execute("DELETE FROM pending_messages WHERE user_id = ?", (user_id,))
+        await self._db.commit()
+
+    async def count(self, user_id: int) -> int:
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) AS c FROM pending_messages WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        return int(row["c"])
+
+
+class AIRequestRepository:
+    """Per-user лимит AI-запросов, переживающий перезапуск процесса."""
+
+    def __init__(self, db: aiosqlite.Connection):
+        self._db = db
+
+    async def reserve(
+        self, user_id: int, limit: int, now_ts: float | None = None,
+    ) -> tuple[bool, float | None]:
+        """Резервирует один запрос; возвращает ``(allowed, retry_at_epoch)``.
+
+        В норме доступ и запись сериализованы per-user lock менеджера. Старые
+        записи удаляются здесь, поэтому таблица не растёт бесконечно.
+        """
+        limit = max(0, int(limit))
+        current = time.time() if now_ts is None else float(now_ts)
+        cutoff = current - 3600.0
+        await self._db.execute(
+            "DELETE FROM ai_request_log WHERE requested_at < ?", (cutoff,)
+        )
+        cursor = await self._db.execute(
+            """SELECT COUNT(*) AS count, MIN(requested_at) AS oldest
+               FROM ai_request_log WHERE user_id = ? AND requested_at >= ?""",
+            (user_id, cutoff),
+        )
+        row = await cursor.fetchone()
+        count = int(row["count"])
+        if count >= limit:
+            oldest = row["oldest"]
+            retry_at = float(oldest) + 3600.0 if oldest is not None else current + 3600.0
+            await self._db.commit()
+            return False, max(current + 0.05, retry_at)
+        await self._db.execute(
+            "INSERT INTO ai_request_log (user_id, requested_at) VALUES (?, ?)",
+            (user_id, current),
+        )
+        await self._db.commit()
+        return True, None
+
+
 class HistoryRepository:
     def __init__(self, db: aiosqlite.Connection):
         self._db = db
 
     async def add(
         self, user_id: int, role: str, content: str,
-        created_at: datetime | None = None,
+        created_at: datetime | None = None, source_key: str | None = None,
     ) -> None:
-        await self._db.execute(
-            "INSERT INTO history (user_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (user_id, role, content, created_at.isoformat(timespec="microseconds") if created_at else _now()),
+        await self.add_many(
+            user_id,
+            [(role, content, created_at, source_key)],
+        )
+
+    async def add_many(
+        self, user_id: int,
+        entries: list[tuple[str, str, datetime | None, str | None]] |
+                   tuple[tuple[str, str, datetime | None, str | None], ...],
+    ) -> None:
+        """Атомарно добавляет turn; ``source_key`` делает retry идемпотентным."""
+        if not entries:
+            return
+        values = [
+            (
+                user_id,
+                role,
+                content,
+                created_at.isoformat(timespec="microseconds")
+                if created_at else _now(),
+                source_key,
+            )
+            for role, content, created_at, source_key in entries
+        ]
+        await self._db.executemany(
+            """INSERT OR IGNORE INTO history
+               (user_id, role, content, created_at, source_key)
+               VALUES (?, ?, ?, ?, ?)""",
+            values,
         )
         await self._db.commit()
 

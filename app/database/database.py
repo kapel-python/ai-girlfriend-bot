@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS history (
     user_id    INTEGER NOT NULL,
     role       TEXT    NOT NULL,
     content    TEXT    NOT NULL,
-    created_at TEXT    NOT NULL
+    created_at TEXT    NOT NULL,
+    source_key TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_history_user ON history(user_id, id);
 
@@ -38,6 +39,24 @@ CREATE TABLE IF NOT EXISTS memory_facts (
     created_at TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_facts_user ON memory_facts(user_id, id);
+
+CREATE TABLE IF NOT EXISTS pending_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    chat_id    INTEGER NOT NULL,
+    content    TEXT    NOT NULL,
+    created_at TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pending_user
+    ON pending_messages(user_id, created_at, id);
+
+CREATE TABLE IF NOT EXISTS ai_request_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL,
+    requested_at REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_requests_user_time
+    ON ai_request_log(user_id, requested_at);
 
 CREATE TABLE IF NOT EXISTS global_settings (
     key   TEXT PRIMARY KEY,
@@ -60,7 +79,9 @@ async def init_db(path: str) -> aiosqlite.Connection:
     db = await aiosqlite.connect(path)
     db.row_factory = aiosqlite.Row
     await db.executescript(_SCHEMA)
-    # миграция: колонка mood для баз, созданных ранними версиями
+    # Новые очереди создаются через CREATE TABLE IF NOT EXISTS выше, поэтому
+    # старый bot.db получает их без изменения существующих данных. Ниже —
+    # совместимые последовательные миграции старых user_settings.
     cursor = await db.execute("PRAGMA table_info(user_settings)")
     columns = {row["name"] for row in await cursor.fetchall()}
     if "mood" not in columns:
@@ -77,6 +98,14 @@ async def init_db(path: str) -> aiosqlite.Connection:
         await db.execute("ALTER TABLE user_settings ADD COLUMN last_ai_message_ts REAL NOT NULL DEFAULT 0")
     if "custom_personality" not in columns:
         await db.execute("ALTER TABLE user_settings ADD COLUMN custom_personality TEXT NOT NULL DEFAULT ''")
+    history_columns_cursor = await db.execute("PRAGMA table_info(history)")
+    history_columns = {row["name"] for row in await history_columns_cursor.fetchall()}
+    if "source_key" not in history_columns:
+        await db.execute("ALTER TABLE history ADD COLUMN source_key TEXT")
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_source "
+        "ON history(user_id, source_key)"
+    )
     # Текущие встроенные характеры становятся начальными данными. После этого
     # таблица является единственным источником списка для интерфейса и чата.
     import datetime as _datetime

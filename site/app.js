@@ -367,7 +367,7 @@
     {
       id: 'manipulator', tab: '🎭 манипулятор',
       title: 'Манипулятор',
-      desc: 'Сложный характер: обиды между строк, проверки, игра на внимании. Не для всех — но именно она лучше всего показывает работу настроения.',
+      desc: 'Сложный вымышленный характер: обиды между строк, проверки, игра на внимании. Перед применением бот показывает предупреждение о эмоционально давящем стиле; 18+ и манипулятор остаются только вымышленными персонажами.',
       meters: [55, 80, 90],
       chat: [
         { side: 'out', text: 'как день прошёл?' },
@@ -378,12 +378,24 @@
       ]
     },
     {
-      id: 'custom', tab: '✍️ свой промт',
+      id: '18plus', tab: '🔞 18+',
+      title: '18+',
+      desc: 'Строго совершеннолетний вымышленный персонаж: смелый романтический флирт и чувственные намёки, но с явным подтверждением возраста и уважением к отказу собеседника.',
+      meters: [90, 85, 70],
+      chat: [
+        { side: 'out', text: 'подтверди, что тебе есть 18' },
+        { side: 'in',  text: 'есть, продолжай' },
+        { side: 'in',  text: 'тогда я могу быть чуть смелее' },
+        { side: 'out', text: 'и не забывай уважать мои границы' }
+      ]
+    },
+    {
+      id: 'custom', tab: '✍️ свой характер',
       title: 'Свой промт',
       desc: 'Поверх любого пресета можно дописать собственный слой: имя, биографию, привычки, манеру речи. Системная часть при этом остаётся защищённой.',
       meters: [60, 60, 60],
       chat: [
-        { side: 'out', text: '/menu → характер → свой промт' },
+        { side: 'out', text: '/start → 🎭 настройки характера → свой характер' },
         { side: 'in',  text: 'её зовут так, как вы напишете' },
         { side: 'in',  text: 'у неё будет ваша биография и ваши привычки' },
         { side: 'in',  text: 'а формат ответа всё равно останется валидным' }
@@ -479,7 +491,7 @@
       '│   ├── models.py       <span class="d"># список моделей + кэш</span>\n' +
       '│   └── response_parser.py <span class="d"># устойчивый JSON-парсер</span>\n' +
       '├── <span class="k">conversation/</span>\n' +
-      '│   ├── manager.py      <span class="d"># debounce, generation_id</span>\n' +
+      '│   ├── manager.py      <span class="d"># debounce, generation_id, scheduler</span>\n' +
       '│   ├── memory.py       <span class="d"># краткосрочная + долгосрочная</span>\n' +
       '│   ├── typing_simulator.py <span class="d"># модель набора текста</span>\n' +
       '│   └── sender.py       <span class="d"># typing keep-alive, нарезка</span>\n' +
@@ -508,7 +520,9 @@
       '      ↓\n' +
       '<span class="k">Telegram Sender</span> <span class="d">── typing keep-alive, отправка</span>\n' +
       '      ↓\n' +
-      '<span class="s">SQLite</span> <span class="d">── история, факты, настроение</span>',
+      '<span class="s">SQLite</span> <span class="d">── история, факты, настроение</span>\n\n' +
+      'Proactive: <span class="k">DECISION</span> → <span class="k">TIMING</span> → 1 сообщение\n' +
+      'Legacy morning/stage settings: <span class="d">deprecated</span>',
 
     env:
       '<span class="d"># --- Telegram ---</span>\n' +
@@ -516,14 +530,19 @@
       '<span class="d"># --- модель ---</span>\n' +
       '<span class="k">AI_API_KEY</span>=<span class="s">ваш ключ</span>\n' +
       '<span class="k">AI_BASE_URL</span>=<span class="s">https://gptunnel.ru/v1</span>\n' +
-      '<span class="k">DEFAULT_MODEL</span>=<span class="s">gpt-4o-mini</span>\n\n' +
+      '<span class="k">DEFAULT_MODEL</span>=<span class="s">deepseek-v4-flash</span>\n\n' +
       '<span class="d"># --- поведение ---</span>\n' +
       '<span class="k">MESSAGE_DEBOUNCE</span>=<span class="n">2.0</span>      <span class="d"># пауза перед ответом, сек</span>\n' +
       '<span class="k">TYPING_SIMULATION</span>=<span class="n">true</span>     <span class="d"># человеческая скорость набора</span>\n' +
-      '<span class="k">SHORT_MEMORY_LIMIT</span>=<span class="n">100</span>    <span class="d"># сообщений в контексте</span>\n' +
-      '<span class="k">PROACTIVE_ENABLED</span>=<span class="n">true</span>     <span class="d"># пишет первой</span>\n\n' +
+      '<span class="k">SHORT_MEMORY_LIMIT</span>=<span class="n">100</span>    <span class="d"># сообщений в контексте</span>\n\n' +
+      '<span class="k">PROACTIVE_ENABLED</span>=<span class="n">true</span>     <span class="d"># DECISION → TIMING</span>\n' +
+      '<span class="k">PROACTIVE_MIN_DELAY_MINUTES</span>=<span class="n">3</span>\n' +
+      '<span class="k">PROACTIVE_MAX_DELAY_MINUTES</span>=<span class="n">720</span>\n' +
+      '<span class="k">PROACTIVE_MAX_MESSAGES</span>=<span class="n">4</span>\n' +
+      '<span class="k">PROACTIVE_COOLDOWN_MINUTES</span>=<span class="n">20</span>\n\n' +
+      '<span class="d"># morning/stage settings — deprecated</span>\n\n' +
       '<span class="d"># --- хранилище ---</span>\n' +
-      '<span class="k">DATABASE_PATH</span>=<span class="s">data/bot.db</span>'
+      '<span class="k">DATABASE_PATH</span>=<span class="s">bot.db</span>'
   };
 
   function initCodeTabs() {

@@ -44,6 +44,17 @@ class HistoryMessage:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+@dataclass(frozen=True)
+class PendingMessageRecord:
+    """Durable входящее сообщение, ещё не завершённое pipeline."""
+
+    id: int
+    user_id: int
+    chat_id: int
+    content: str
+    created_at: datetime
+
+
 @dataclass
 class MemoryFact:
     user_id: int

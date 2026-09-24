@@ -203,16 +203,17 @@
         <div class="card__icon">💔</div>
         <h3>Обижается по-настоящему</h3>
         <p>
-          Пропали посреди разговора — через 20–45 минут лёгкое «ты куда?», через 3–6 часов
-          вторая и последняя попытка. Проигнорировали обе — замолкает, а вернувшемуся
-          отвечает холодно, пока сама не оттает.
+          После паузы код отдельно выбирает широкое окно ожидания, модель решает,
+          уместно ли писать, и только потом код выбирает время отправки. Один
+          цикл — не больше одного сообщения; старые фиксированные стадии и
+          отдельное «доброе утро» deprecated.
         </p>
         <div class="escalation" aria-hidden="true">
-          <span class="escalation__step"><b>1</b>20–45 мин</span>
+          <span class="escalation__step"><b>1</b>DECISION</span>
           <span class="escalation__line"></span>
-          <span class="escalation__step"><b>2</b>3–6 ч</span>
+          <span class="escalation__step"><b>2</b>TIMING</span>
           <span class="escalation__line"></span>
-          <span class="escalation__step escalation__step--cold"><b>3</b>тишина</span>
+          <span class="escalation__step escalation__step--cold"><b>3</b>1 сообщение</span>
         </div>
       </article>
 
@@ -225,7 +226,7 @@
       <article class="card reveal" data-reveal data-reveal-delay="120">
         <div class="card__icon">🎚️</div>
         <h3>Всё через меню</h3>
-        <p>Характер, модель, пауза, промт, три уровня очистки — inline-кнопками, без правки конфигов.</p>
+        <p>Характер, глобальные модель и параметры, четыре варианта очистки — inline-кнопками, без правки конфигов.</p>
       </article>
 
       <article class="card card--wide reveal" data-reveal data-reveal-delay="60">
@@ -374,17 +375,22 @@ python run.py">
 
 <span class="c-com"># 3 — поехали</span>
 <span class="c-p">$</span> python run.py
-<span class="c-ok">✓</span> база инициализирована · <span class="c-s">data/bot.db</span>
-<span class="c-ok">✓</span> модели загружены из API · кэш 60 мин
+<span class="c-ok">✓</span> база инициализирована · <span class="c-s">bot.db</span>
 <span class="c-ok">✓</span> polling запущен — напишите боту <span class="c-s">/start</span></code></pre>
     </div>
 
     <div class="cmds">
       <div class="cmd reveal" data-reveal><code>/start</code><span>меню настроек</span></div>
-      <div class="cmd reveal" data-reveal data-reveal-delay="60"><code>/reset</code><span>очистить диалог</span></div>
+      <div class="cmd reveal" data-reveal data-reveal-delay="60"><code>/reset</code><span>открыть очистку диалога</span></div>
       <div class="cmd reveal" data-reveal data-reveal-delay="120"><code>/help</code><span>справка</span></div>
-      <div class="cmd reveal" data-reveal data-reveal-delay="180"><code>docker compose up</code><span>то же самое в контейнере</span></div>
+      <div class="cmd reveal" data-reveal data-reveal-delay="180"><code>docker compose up --build</code><span>то же самое в контейнере</span></div>
     </div>
+    <p class="section__sub" style="margin-top: 22px">
+      Docker использует <code>./data</code> и <code>/app/data/bot.db</code>.
+      Этот лендинг статический: опубликуйте каталог <code>site/</code> или откройте
+      <code>site/index.html</code>. Deep-link placeholder:
+      <a href="https://t.me/YOUR_BOT_USERNAME?start"><code>t.me/YOUR_BOT_USERNAME?start</code></a>.
+    </p>
   </div>
 </section>
 
@@ -399,7 +405,7 @@ python run.py">
     <div class="faq" id="faqList">
       <details class="faq__item reveal" data-reveal>
         <summary>Какие модели поддерживаются?<span class="faq__mark" aria-hidden="true"></span></summary>
-        <div class="faq__body"><p>Любой OpenAI-совместимый эндпоинт. Список моделей бот забирает через <code>GET /v1/models</code>, кэширует на час и даёт выбрать прямо в меню — выбор сохраняется отдельно для каждого пользователя.</p></div>
+        <div class="faq__body"><p>Любой OpenAI-совместимый эндпоинт. Список моделей бот забирает через <code>GET /v1/models</code>, кэширует на час и даёт выбрать прямо в меню. Выбор модели, глобальный промт, typing и debounce — общие для всех и меняются администратором; personality, mood, история и факты остаются per-user.</p></div>
       </details>
 
       <details class="faq__item reveal" data-reveal data-reveal-delay="60">
@@ -424,7 +430,7 @@ python run.py">
 
       <details class="faq__item reveal" data-reveal data-reveal-delay="300">
         <summary>Как всё стереть?<span class="faq__mark" aria-hidden="true"></span></summary>
-        <div class="faq__body"><p>Очистка трёхуровневая: только диалог, диалог вместе с долгосрочной памятью или полный сброс — включая настроение и стадию обиды.</p></div>
+        <div class="faq__body"><p>В меню четыре варианта: только диалог, диалог вместе с долгосрочной памятью, только настроение и полный сброс. Полный сброс также обнуляет служебный счётчик proactive_stage; настройки, промт и глобальная модель сохраняются.</p></div>
       </details>
     </div>
   </div>
