@@ -196,6 +196,14 @@ class MemoryService:
             except asyncio.CancelledError:
                 raise
             except AIClientError as e:
+                if getattr(e, "code", "") == "invalid_response":
+                    # Провайдер иногда возвращает пустой content для facts:
+                    # нечего обновлять, это не actionable warning.
+                    logger.info(
+                        "user_id=%s event=facts_extraction_skipped reason=empty_response",
+                        user_id,
+                    )
+                    return
                 logger.warning("user_id=%s event=facts_extraction_failed error=%s", user_id, e)
             except Exception:
                 logger.exception("user_id=%s event=facts_extraction_failed", user_id)

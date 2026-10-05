@@ -1365,6 +1365,17 @@ class ConversationManager:
     def _schedule_proactive(self, session: UserSession) -> None:
         session.proactive_due_at = time.monotonic() + self._sample_proactive_delay()
 
+    @staticmethod
+    def _is_billing_error(exc: BaseException) -> bool:
+        """Баланс провайдера (402): долбить проверками каждый час бессмысленно."""
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(exc, "status", None)
+        if status == 402:
+            return True
+        code = str(getattr(exc, "code", "") or "").lower()
+        return code in {"http_402", "billing", "payment_required"}
+
     def _cancel_proactive_plan(self, session: UserSession) -> None:
         """Invalidate a due/approved plan without touching mood state."""
         session.proactive_waiting_to_send = False
@@ -1592,7 +1603,13 @@ class ConversationManager:
         except AIClientError as exc:
             if self._is_current(user_id, generation):
                 session.proactive_waiting_to_send = False
-                self._schedule_proactive(session)
+                if self._is_billing_error(exc):
+                    session.proactive_due_at = time.monotonic() + 6 * 3600.0
+                    logger.warning(
+                        "user_id=%s event=proactive_billing_backoff hours=6", user_id
+                    )
+                else:
+                    self._schedule_proactive(session)
             logger.warning(
                 "user_id=%s event=proactive_decision_api_error error=%s", user_id, exc
             )
@@ -1732,7 +1749,13 @@ class ConversationManager:
                 )
             if self._is_current(user_id, generation):
                 session.proactive_waiting_to_send = False
-                self._schedule_proactive(session)
+                if isinstance(exc, AIClientError) and self._is_billing_error(exc):
+                    session.proactive_due_at = time.monotonic() + 6 * 3600.0
+                    logger.warning(
+                        "user_id=%s event=proactive_billing_backoff hours=6", user_id
+                    )
+                else:
+                    self._schedule_proactive(session)
             logger.warning(
                 "user_id=%s event=proactive_message_api_error error=%s", user_id, exc
             )
