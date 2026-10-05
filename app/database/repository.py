@@ -247,45 +247,107 @@ class PendingMessageRepository:
 
     @staticmethod
     def _model(row) -> PendingMessageRecord:
+        columns = set(row.keys())
         return PendingMessageRecord(
             id=int(row["id"]),
             user_id=int(row["user_id"]),
             chat_id=int(row["chat_id"]),
             content=str(row["content"]),
             created_at=_parse_datetime(row["created_at"]),
+            telegram_id=int(row["telegram_id"])
+            if "telegram_id" in columns and row["telegram_id"] is not None
+            else None,
         )
 
     async def enqueue(
         self, user_id: int, chat_id: int, content: str,
         created_at: datetime | None = None,
+        telegram_id: int | None = None,
     ) -> PendingMessageRecord:
         timestamp = created_at or datetime.now(timezone.utc)
-        cursor = await self._db.execute(
-            """INSERT INTO pending_messages
-               (user_id, chat_id, content, created_at) VALUES (?, ?, ?, ?)""",
-            (user_id, chat_id, content, timestamp.isoformat(timespec="microseconds")),
-        )
+        if telegram_id is not None:
+            try:
+                telegram_id = int(telegram_id)
+            except (TypeError, ValueError):
+                telegram_id = None
+        if telegram_id is not None:
+            cursor = await self._db.execute(
+                """SELECT id, user_id, chat_id, content, created_at, telegram_id
+                   FROM pending_messages WHERE user_id = ? AND telegram_id = ?""",
+                (user_id, telegram_id),
+            )
+            row = await cursor.fetchone()
+            if row is not None:
+                return self._model(row)
+        try:
+            cursor = await self._db.execute(
+                """INSERT INTO pending_messages
+                   (user_id, chat_id, content, created_at, telegram_id)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, chat_id, content, timestamp.isoformat(timespec="microseconds"), telegram_id),
+            )
+        except Exception:
+            # Старая БД без колонки telegram_id (миграция ещё не применена):
+            # повторяем без неё. UNIQUE(idx_pending_tg) после миграции сам
+            # защитит от дубля повторной доставки Telegram.
+            if telegram_id is None:
+                raise
+            try:
+                cursor = await self._db.execute(
+                    """INSERT INTO pending_messages
+                       (user_id, chat_id, content, created_at) VALUES (?, ?, ?, ?)""",
+                    (user_id, chat_id, content, timestamp.isoformat(timespec="microseconds")),
+                )
+            except Exception:
+                # Гонка двух одновременных enqueue одного telegram_id без
+                # уникального индекса: перечитываем существующую запись.
+                cursor = await self._db.execute(
+                    """SELECT id, user_id, chat_id, content, created_at
+                       FROM pending_messages WHERE user_id = ? AND content = ?
+                       ORDER BY id DESC LIMIT 1""",
+                    (user_id, content),
+                )
+                row = await cursor.fetchone()
+                if row is not None:
+                    await self._db.commit()
+                    record = self._model(row)
+                    return record
+                raise
         await self._db.commit()
         row_id = int(cursor.lastrowid)
         return PendingMessageRecord(
             id=row_id, user_id=user_id, chat_id=chat_id,
-            content=content, created_at=timestamp,
+            content=content, created_at=timestamp, telegram_id=telegram_id,
         )
 
     async def list_pending(self, user_id: int) -> list[PendingMessageRecord]:
-        cursor = await self._db.execute(
-            """SELECT id, user_id, chat_id, content, created_at
-               FROM pending_messages WHERE user_id = ?
-               ORDER BY created_at, id""",
-            (user_id,),
-        )
+        try:
+            cursor = await self._db.execute(
+                """SELECT id, user_id, chat_id, content, created_at, telegram_id
+                   FROM pending_messages WHERE user_id = ?
+                   ORDER BY created_at, id""",
+                (user_id,),
+            )
+        except Exception:
+            cursor = await self._db.execute(
+                """SELECT id, user_id, chat_id, content, created_at
+                   FROM pending_messages WHERE user_id = ?
+                   ORDER BY created_at, id""",
+                (user_id,),
+            )
         return [self._model(row) for row in await cursor.fetchall()]
 
     async def list_all_pending(self) -> list[PendingMessageRecord]:
-        cursor = await self._db.execute(
-            """SELECT id, user_id, chat_id, content, created_at
-               FROM pending_messages ORDER BY user_id, created_at, id"""
-        )
+        try:
+            cursor = await self._db.execute(
+                """SELECT id, user_id, chat_id, content, created_at, telegram_id
+                   FROM pending_messages ORDER BY user_id, created_at, id"""
+            )
+        except Exception:
+            cursor = await self._db.execute(
+                """SELECT id, user_id, chat_id, content, created_at
+                   FROM pending_messages ORDER BY user_id, created_at, id"""
+            )
         return [self._model(row) for row in await cursor.fetchall()]
 
     async def delete_pending(self, message_ids: list[int] | tuple[int, ...]) -> None:

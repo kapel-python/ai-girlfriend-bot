@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS pending_messages (
     user_id    INTEGER NOT NULL,
     chat_id    INTEGER NOT NULL,
     content    TEXT    NOT NULL,
-    created_at TEXT    NOT NULL
+    created_at TEXT    NOT NULL,
+    telegram_id INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_pending_user
     ON pending_messages(user_id, created_at, id);
@@ -105,6 +106,14 @@ async def init_db(path: str) -> aiosqlite.Connection:
     await db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_source "
         "ON history(user_id, source_key)"
+    )
+    pending_columns_cursor = await db.execute("PRAGMA table_info(pending_messages)")
+    pending_columns = {row["name"] for row in await pending_columns_cursor.fetchall()}
+    if "telegram_id" not in pending_columns:
+        await db.execute("ALTER TABLE pending_messages ADD COLUMN telegram_id INTEGER")
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_tg "
+        "ON pending_messages(user_id, telegram_id) WHERE telegram_id IS NOT NULL"
     )
     # Текущие встроенные характеры становятся начальными данными. После этого
     # таблица является единственным источником списка для интерфейса и чата.

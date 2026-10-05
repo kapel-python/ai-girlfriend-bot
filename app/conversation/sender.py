@@ -158,26 +158,48 @@ class TelegramSender:
         typing_enabled: bool,
         typing_task: asyncio.Task | None = None,
         progress_callback: ProgressCallback | None = None,
+        initial_typing_discount: float = 0.0,
     ) -> SendResult:
         """Отправляет сообщения и возвращает только подтверждённые chunks.
 
         ``progress_callback`` совместим как с sync-, так и с async-функцией и
         вызывается после каждого успешного ``send_message``. Исключения и
         отмена не маскируются, но callback уже сохранил все предыдущие chunks.
+
+        ``initial_typing_discount`` вычитается из задержки первого chunk:
+        индикатор «печатает…» уже был виден во время генерации AI, поэтому
+        повторное полное ожидание складывало бы две задержки (баг «первое
+        сообщение очень долго»). Последующие chunks ждут полностью.
         """
         sent: list[str] = []
         message_ids: list[int | None] = []
 
         await self._ensure_private(chat_id)
+        try:
+            discount = max(0.0, float(initial_typing_discount))
+        except (TypeError, ValueError):
+            discount = 0.0
+        first_chunk = True
         for index, message in enumerate(messages):
             chunks = split_long_text(message)
 
             for chunk_index, chunk in enumerate(chunks):
                 if typing_enabled:
                     duration = calculate_typing_duration(chunk)
-                    logger.info(
-                        "user_id=%s event=typing_started duration=%.1f", user_id, duration
-                    )
+                    if first_chunk and discount > 0.0:
+                        effective = duration - discount
+                        if effective < 0.0:
+                            effective = 0.0
+                        logger.info(
+                            "user_id=%s event=typing_started duration=%.1f discounted=%.1f",
+                            user_id, duration, effective,
+                        )
+                        duration = effective
+                    else:
+                        logger.info(
+                            "user_id=%s event=typing_started duration=%.1f", user_id, duration
+                        )
+                    first_chunk = False
                     own_task = None
                     if typing_task is None:
                         own_task = asyncio.create_task(self.typing_keepalive(chat_id))

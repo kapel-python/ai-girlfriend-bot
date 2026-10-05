@@ -37,10 +37,13 @@ async def on_text(message: Message, manager: ConversationManager) -> None:
         return
     # ``from_user`` is present for private text messages.  Keeping the guard
     # above also prevents a group message from entering the per-user session.
+    # message_id передаём для идемпотентности: повторная доставка одного
+    # апдейта Telegram (at-least-once) не должна двоить реплику.
     await manager.handle_message(
         user_id=message.from_user.id,
         chat_id=message.chat.id,
         text=message.text,
+        telegram_id=getattr(message, "message_id", None),
     )
 
 

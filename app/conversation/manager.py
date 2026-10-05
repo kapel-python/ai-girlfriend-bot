@@ -84,6 +84,7 @@ class PendingMessage:
     created_at: datetime
     chat_id: int | None = None
     durable_id: int | None = None
+    telegram_id: int | None = None
 
 
 @dataclass
@@ -234,12 +235,19 @@ class ConversationManager:
             created_at=record.created_at,
             chat_id=record.chat_id,
             durable_id=record.id,
+            telegram_id=getattr(record, "telegram_id", None),
         )
 
     def _dedupe_and_sort_buffer(self, session: UserSession) -> None:
         unique: list[PendingMessage] = []
         ids: set[int] = set()
+        seen_tg: set[tuple[int, int]] = set()
         for item in session.buffer:
+            if item.telegram_id is not None and item.chat_id is not None:
+                tg_key = (int(item.chat_id), int(item.telegram_id))
+                if tg_key in seen_tg:
+                    continue
+                seen_tg.add(tg_key)
             if item.durable_id is not None:
                 if item.durable_id in ids:
                     continue
@@ -260,7 +268,16 @@ class ConversationManager:
             if existing is not item
             and not (
                 existing.durable_id is not None
+                and item.durable_id is not None
                 and existing.durable_id == item.durable_id
+            )
+            and not (
+                existing.telegram_id is not None
+                and item.telegram_id is not None
+                and existing.chat_id is not None
+                and item.chat_id is not None
+                and existing.telegram_id == item.telegram_id
+                and existing.chat_id == item.chat_id
             )
         ]
 
@@ -272,10 +289,21 @@ class ConversationManager:
         known_ids = {
             item.durable_id for item in session.buffer if item.durable_id is not None
         }
+        known_tg = {
+            (int(item.chat_id), int(item.telegram_id))
+            for item in session.buffer
+            if item.telegram_id is not None and item.chat_id is not None
+        }
         for record in records:
-            if record.id not in known_ids:
-                session.buffer.append(self._record_to_pending(record))
-                known_ids.add(record.id)
+            if record.id in known_ids:
+                continue
+            tg = getattr(record, "telegram_id", None)
+            if tg is not None and (int(record.chat_id), int(tg)) in known_tg:
+                continue
+            session.buffer.append(self._record_to_pending(record))
+            known_ids.add(record.id)
+            if tg is not None:
+                known_tg.add((int(record.chat_id), int(tg)))
         self._dedupe_and_sort_buffer(session)
 
     async def _persist_incoming(
@@ -283,13 +311,44 @@ class ConversationManager:
     ) -> bool:
         if self._pending is None:
             return False
+        # Повторная доставка одного Telegram message_id (at-least-once):
+        # второй handle_message с тем же telegram_id не создаёт новый pending.
+        if item.telegram_id is not None:
+            for existing in session.buffer:
+                if (
+                    existing is not item
+                    and existing.telegram_id == item.telegram_id
+                    and existing.chat_id is not None
+                    and item.chat_id is not None
+                    and existing.chat_id == item.chat_id
+                ):
+                    if existing.durable_id is not None:
+                        item.durable_id = existing.durable_id
+                        return True
+                    break
         try:
             record = await self._pending.enqueue(
                 user_id, int(item.chat_id or session.last_chat_id or user_id),
                 item.text, item.created_at,
+                telegram_id=item.telegram_id,
             )
+            # enqueue вернул существующую запись (дубль): в буфере уже есть
+            # оригинал — текущий item лишний, убираем его.
+            if item.telegram_id is not None:
+                for existing in session.buffer:
+                    if (
+                        existing is not item
+                        and existing.telegram_id == item.telegram_id
+                        and existing.chat_id is not None
+                        and record.chat_id == existing.chat_id
+                        and existing.durable_id == record.id
+                    ):
+                        self._remove_pending(session, item)
+                        return True
             item.durable_id = record.id
             item.chat_id = record.chat_id
+            if getattr(record, "telegram_id", None) is not None:
+                item.telegram_id = record.telegram_id
             return True
         except Exception:
             logger.exception("user_id=%s event=pending_persist_failed", user_id)
@@ -355,16 +414,42 @@ class ConversationManager:
             if clear_pending:
                 await self._clear_pending(user_id)
 
-    async def handle_message(self, user_id: int, chat_id: int, text: str) -> None:
+    async def handle_message(
+        self, user_id: int, chat_id: int, text: str,
+        telegram_id: int | None = None,
+    ) -> None:
         """Точка входа из Telegram handler.
 
         Generation, FIFO item и intent фиксируются до первого await. Поэтому
         даже back-to-back вызовы не могут запустить pipeline без предыдущей
         реплики или без cancel+await старого task.
+
+        ``telegram_id`` — message_id из Telegram для идемпотентности:
+        повторная доставка одного апдейта (at-least-once) не создаёт дубль.
         """
         session = self._session(user_id)
         received_at = now()
-        incoming = PendingMessage(text=text, created_at=received_at, chat_id=chat_id)
+        try:
+            telegram_id = int(telegram_id) if telegram_id is not None else None
+        except (TypeError, ValueError):
+            telegram_id = None
+        # Быстрый in-memory фильтр повторной доставки до роста generation:
+        # второй апдейт с тем же telegram_id игнорируется полностью.
+        if telegram_id is not None:
+            for existing in session.buffer:
+                if (
+                    existing.telegram_id == telegram_id
+                    and existing.chat_id == chat_id
+                ):
+                    logger.info(
+                        "user_id=%s event=duplicate_telegram_update_ignored tg=%s",
+                        user_id, telegram_id,
+                    )
+                    return
+        incoming = PendingMessage(
+            text=text, created_at=received_at, chat_id=chat_id,
+            telegram_id=telegram_id,
+        )
         session.buffer.append(incoming)
         session.generation_id += 1
         generation = session.generation_id
@@ -399,13 +484,16 @@ class ConversationManager:
                     except Exception:
                         logger.exception("user_id=%s event=pending_delete_failed", user_id)
                 return
-            await self._load_pending_locked(user_id, session)
 
-            # Только после durable enqueue ждём старый pipeline. Это сохраняет
-            # вход даже для AI, который на время игнорирует отмену.
+            # Сначала ждём старый pipeline до конца его cleanup: он удалит свои
+            # pending-строки из БД. Только потом подгружаем durable очередь.
+            # Иначе in-flight сообщения воскрешаются в буфер и обрабатываются
+            # дважды (баг «сообщения продублировались», gaps в history из-за
+            # INSERT OR IGNORE по source_key).
             await self._wait_task(old_pipeline)
             await self._wait_task(old_proactive)
             await self._wait_task(old_retry)
+            await self._load_pending_locked(user_id, session)
             if session.task is old_pipeline:
                 session.task = None
             if session.proactive_task is old_proactive:
@@ -801,6 +889,10 @@ class ConversationManager:
             logger.info("user_id=%s event=mood_updated", user_id)
 
     def _incoming_source_key(self, item: PendingMessage) -> str:
+        # Стабильный ключ для повторной доставки: один Telegram message_id —
+        # одна запись в history даже после restart (INSERT OR IGNORE).
+        if item.telegram_id is not None and item.chat_id is not None:
+            return f"incoming:tg:{int(item.chat_id)}:{int(item.telegram_id)}"
         if item.durable_id is not None:
             return f"incoming:{item.durable_id}"
         digest = hashlib.sha256(
@@ -812,7 +904,7 @@ class ConversationManager:
         self, taken: list[PendingMessage], index: int, chunk: str,
         message_id: int | None,
     ) -> str:
-        ids = ",".join(str(item.durable_id or self._incoming_source_key(item)) for item in taken)
+        ids = ",".join(self._incoming_source_key(item) for item in taken)
         digest = hashlib.sha256(
             f"{ids}\0{index}\0{message_id}\0{chunk}".encode("utf-8")
         ).hexdigest()
@@ -951,10 +1043,12 @@ class ConversationManager:
 
                 assert taken is not None
                 user_text = "\n".join(item.text for item in taken)
+                typing_visible_since: float | None = None
                 if typing_enabled:
                     typing_task = asyncio.create_task(
                         self._sender.typing_keepalive(chat_id)
                     )
+                    typing_visible_since = time.monotonic()
 
                 logger.info(
                     "user_id=%s event=generation_started parts=%d", user_id, len(taken)
@@ -1004,6 +1098,13 @@ class ConversationManager:
                     confirmed.append(progress.chunk)
                     confirmed_ids.append(progress.message_id)
 
+                initial_discount = 0.0
+                if typing_enabled and typing_visible_since is not None:
+                    # Индикатор уже был виден всё время генерации: не складываем
+                    # AI-время и typing-задержку первого сообщения.
+                    initial_discount = max(
+                        0.0, time.monotonic() - typing_visible_since
+                    )
                 sent_result = await self._send_messages(
                     chat_id=chat_id,
                     user_id=user_id,
@@ -1011,6 +1112,7 @@ class ConversationManager:
                     typing_enabled=typing_enabled,
                     typing_task=typing_task,
                     progress_callback=on_progress,
+                    initial_typing_discount=initial_discount,
                 )
                 normalized_chunks, normalized_ids = self._normalize_send_result(sent_result)
                 if len(normalized_chunks) > len(confirmed):
@@ -1181,7 +1283,7 @@ class ConversationManager:
     async def _send_messages(
         self, *, chat_id: int, user_id: int, messages: list[str],
         typing_enabled: bool, typing_task: asyncio.Task | None = None,
-        progress_callback=None,
+        progress_callback=None, initial_typing_discount: float = 0.0,
     ):
         kwargs = {
             "chat_id": chat_id,
@@ -1192,6 +1294,12 @@ class ConversationManager:
         }
         if self._sender_supports_progress():
             kwargs["progress_callback"] = progress_callback
+        try:
+            signature = inspect.signature(self._sender.send_messages)
+            if "initial_typing_discount" in signature.parameters:
+                kwargs["initial_typing_discount"] = initial_typing_discount
+        except (TypeError, ValueError):
+            pass
         return await self._sender.send_messages(**kwargs)
 
     def _schedule_memory_extraction(self, **kwargs) -> None:

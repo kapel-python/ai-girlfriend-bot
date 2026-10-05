@@ -53,6 +53,7 @@ class PendingMessageRecord:
     chat_id: int
     content: str
     created_at: datetime
+    telegram_id: int | None = None
 
 
 @dataclass
